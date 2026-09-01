@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useGameStore } from './store';
 import type { NodeKind } from './types';
+import { useWebMCP } from './use-webmcp';
 
 export default function GameControls() {
   const { nodes, currentPlayer, movesRemaining, gameStatus, question } = useGameStore();
   const { plant, branch, prune, markGap, markClear, undoLastMove, resetGame } = useGameStore();
+  const { hasWebMCP } = useWebMCP();
 
   const [selectedNodeId, setSelectedNodeId] = useState<string>('');
   const [newLabel, setNewLabel] = useState('');
@@ -89,6 +91,20 @@ export default function GameControls() {
   const gapCount = nodes.filter(n => n.kind === 'gap').length;
   const isWinnable = nodes.length >= 5 && gapCount === 0;
 
+  const handleSkipAgent = () => {
+    useGameStore.setState({ currentPlayer: 'human' });
+    showFeedback('Skipped agent turn');
+  };
+
+  useEffect(() => {
+    if (!hasWebMCP && currentPlayer === 'agent' && gameStatus === 'playing') {
+      const timer = setTimeout(() => {
+        handleSkipAgent();
+      }, 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [hasWebMCP, currentPlayer, gameStatus]);
+
   return (
     <div style={{
       padding: '20px',
@@ -137,6 +153,19 @@ export default function GameControls() {
           fontSize: '13px',
         }}>
           {feedback}
+        </div>
+      )}
+
+      {gameStatus === 'playing' && currentPlayer === 'agent' && !hasWebMCP && (
+        <div style={{
+          background: '#fef3c7',
+          color: '#92400e',
+          padding: '12px',
+          borderRadius: '6px',
+          fontSize: '13px',
+          textAlign: 'center',
+        }}>
+          Agent turn (skipping in 1s...)
         </div>
       )}
 

@@ -57,14 +57,30 @@ function TreeNodeComponent({ data }: TreeNodeProps) {
           {node.label}
         </div>
       </div>
-      
-      <div style={{ 
-        marginTop: '4px', 
-        fontSize: '11px', 
-        opacity: 0.8,
-        fontWeight: 400,
-      }}>
-        by {node.createdBy}
+
+      <div
+        style={{
+          marginTop: '6px',
+          fontSize: '11px',
+          opacity: 0.85,
+          fontWeight: 400,
+          display: 'flex',
+          alignItems: 'center',
+          gap: '6px',
+        }}
+      >
+        {/* Agents refer to nodes by id, so the human needs to see it too. */}
+        <code
+          style={{
+            background: 'rgba(255, 255, 255, 0.22)',
+            borderRadius: '4px',
+            padding: '1px 5px',
+            fontWeight: 600,
+          }}
+        >
+          {node.id}
+        </code>
+        <span>by {node.createdBy}</span>
       </div>
 
       <Handle

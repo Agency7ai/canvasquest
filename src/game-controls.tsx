@@ -173,10 +173,11 @@ export default function GameControls() {
       {gameStatus === 'playing' && currentPlayer === 'human' && (
         <>
           <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
-            <label style={{ fontSize: '13px', fontWeight: '600', color: '#334155', display: 'block', marginBottom: '8px' }}>
+            <label htmlFor="node-label" style={{ fontSize: '13px', fontWeight: '600', color: '#334155', display: 'block', marginBottom: '8px' }}>
               Label
             </label>
             <input
+              id="node-label"
               type="text"
               value={newLabel}
               onChange={(e) => setNewLabel(e.target.value)}
@@ -210,10 +211,11 @@ export default function GameControls() {
           ) : (
             <>
               <div>
-                <label style={{ fontSize: '13px', fontWeight: '600', color: '#334155', display: 'block', marginBottom: '8px' }}>
-                  Parent Node
+                <label htmlFor="parent-node" style={{ fontSize: '13px', fontWeight: '600', color: '#334155', display: 'block', marginBottom: '8px' }}>
+                  Target Node
                 </label>
                 <select
+                  id="parent-node"
                   value={selectedNodeId}
                   onChange={(e) => setSelectedNodeId(e.target.value)}
                   style={{
@@ -227,17 +229,18 @@ export default function GameControls() {
                   <option value="">Select node...</option>
                   {nodes.map(n => (
                     <option key={n.id} value={n.id}>
-                      {n.label} ({n.kind})
+                      {n.id} · {n.label} ({n.kind})
                     </option>
                   ))}
                 </select>
               </div>
 
               <div>
-                <label style={{ fontSize: '13px', fontWeight: '600', color: '#334155', display: 'block', marginBottom: '8px' }}>
+                <label htmlFor="node-kind" style={{ fontSize: '13px', fontWeight: '600', color: '#334155', display: 'block', marginBottom: '8px' }}>
                   Kind
                 </label>
                 <select
+                  id="node-kind"
                   value={newKind}
                   onChange={(e) => setNewKind(e.target.value as NodeKind)}
                   style={{

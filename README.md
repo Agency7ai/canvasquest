@@ -231,6 +231,28 @@ voice tools    ─┘
 calls the same actions as the agent player. Adding a move means adding it once
 in `moves.ts`, and both agent surfaces pick it up.
 
+## Two views
+
+**Canvas** is the working view: React Flow, draggable nodes, the picker, precise
+editing.
+
+**Aether** is the same graph as a Three.js organism. It is deliberately not a
+tidy diagram. Children are cast off their parent along the golden angle so no
+two branches share a bearing, each generation leans further from vertical, and
+the whole form drifts and breathes on a slow cycle with every node phase-shifted
+so it ripples rather than pulsing in unison. Light travels along the filaments,
+so the structure reads as conducting something rather than as wiring.
+
+Unresolved gaps are the one unstable element: they flicker at a frequency
+nothing else in the scene shares, and they keep flickering until they are
+resolved. The aim is that an unanswered question is visibly restless.
+
+Hover a light for its label, click to select it — selection is shared with the
+Canvas view, so you can pick a node in Aether and prune it from the sidebar.
+Drag to orbit, scroll to zoom.
+
+Three.js is lazy-loaded, so it costs nothing until you open the view.
+
 ### Canvas interaction
 
 Nodes are laid out by a tidy-tree pass in `layout.ts`: each node is centred over

@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { ReactFlowProvider } from 'reactflow';
 import GameCanvas from './game-canvas';
 import GameControls from './game-controls';
@@ -7,12 +7,36 @@ import { useGameStore } from './store';
 import './app.css';
 
 const VoiceAgentIsland = lazy(() => import('./voice-agent-island'));
+const AetherView = lazy(() => import('./aether-view'));
+
+type CanvasView = 'canvas' | 'aether';
+
+const segmentedGroupStyle: React.CSSProperties = {
+  display: 'flex',
+  gap: '2px',
+  background: 'rgba(255,255,255,0.16)',
+  padding: '3px',
+  borderRadius: '8px',
+};
+
+const segmentStyle = (isActive: boolean): React.CSSProperties => ({
+  border: 'none',
+  borderRadius: '6px',
+  padding: '6px 12px',
+  fontSize: '12px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  textTransform: 'capitalize',
+  background: isActive ? 'white' : 'transparent',
+  color: isActive ? '#4c1d95' : 'rgba(255,255,255,0.85)',
+});
 
 export default function App() {
   const { hasWebMCP } = useWebMCP();
   const isVoiceConnected = useGameStore(state => state.isVoiceConnected);
   const mode = useGameStore(state => state.mode);
   const setMode = useGameStore(state => state.setMode);
+  const [view, setView] = useState<CanvasView>('canvas');
 
   const agentStatus = hasWebMCP
     ? 'WebMCP active'
@@ -43,37 +67,32 @@ export default function App() {
           </p>
         </div>
 
-        <div
-          role="group"
-          aria-label="Session mode"
-          style={{
-            display: 'flex',
-            gap: '2px',
-            background: 'rgba(255,255,255,0.16)',
-            padding: '3px',
-            borderRadius: '8px',
-          }}
-        >
-          {(['workspace', 'game'] as const).map(option => (
-            <button
-              key={option}
-              onClick={() => setMode(option)}
-              aria-pressed={mode === option}
-              style={{
-                border: 'none',
-                borderRadius: '6px',
-                padding: '6px 12px',
-                fontSize: '12px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                textTransform: 'capitalize',
-                background: mode === option ? 'white' : 'transparent',
-                color: mode === option ? '#4c1d95' : 'rgba(255,255,255,0.85)',
-              }}
-            >
-              {option}
-            </button>
-          ))}
+        <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+          <div role="group" aria-label="Session mode" style={segmentedGroupStyle}>
+            {(['workspace', 'game'] as const).map(option => (
+              <button
+                key={option}
+                onClick={() => setMode(option)}
+                aria-pressed={mode === option}
+                style={segmentStyle(mode === option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+
+          <div role="group" aria-label="Visualisation" style={segmentedGroupStyle}>
+            {(['canvas', 'aether'] as const).map(option => (
+              <button
+                key={option}
+                onClick={() => setView(option)}
+                aria-pressed={view === option}
+                style={segmentStyle(view === option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
         </div>
         <div
           style={{
@@ -95,9 +114,31 @@ export default function App() {
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
-          <ReactFlowProvider>
-            <GameCanvas />
-          </ReactFlowProvider>
+          {view === 'canvas' ? (
+            <ReactFlowProvider>
+              <GameCanvas />
+            </ReactFlowProvider>
+          ) : (
+            <Suspense
+              fallback={
+                <div
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    background: '#05060f',
+                    display: 'grid',
+                    placeItems: 'center',
+                    color: '#475569',
+                    fontSize: '13px',
+                  }}
+                >
+                  Condensing…
+                </div>
+              }
+            >
+              <AetherView />
+            </Suspense>
+          )}
           <Suspense fallback={null}>
             <VoiceAgentIsland />
           </Suspense>

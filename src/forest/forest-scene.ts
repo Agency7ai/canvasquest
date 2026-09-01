@@ -463,17 +463,20 @@ export function createForestScene(container: HTMLElement, handlers: ForestHandle
   resizeObserver.observe(container);
   resize();
 
-  const clock = new THREE.Clock();
+  // Timer replaces the deprecated Clock, and reads cleanly: one explicit
+  // update per frame, after which delta and elapsed can both be read without
+  // one consuming the other.
+  const timer = new THREE.Timer();
   const dummy = new THREE.Object3D();
   let frame = 0;
-  // Clock.getElapsedTime() consumes the delta internally, so asking for both
-  // leaves delta at zero. Take the delta and accumulate elapsed here instead.
-  let elapsed = 0;
 
   function animate() {
     frame = requestAnimationFrame(animate);
-    const delta = Math.min(clock.getDelta(), 0.05);
-    elapsed += delta;
+    timer.update();
+    // Clamped so a backgrounded tab does not resume with one enormous step
+    // that snaps every branch to full length.
+    const delta = Math.min(timer.getDelta(), 0.05);
+    const elapsed = timer.getElapsed();
 
     seedGroup.scale.setScalar(1 + Math.sin(elapsed * 1.3) * 0.05);
     seedGroup.rotation.y = elapsed * 0.15;

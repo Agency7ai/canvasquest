@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { persist } from 'zustand/middleware';
 import type { GameState, TreeNode, GameAction, PlayerType, NodeKind } from './types';
 
 const DEFAULT_QUESTION = 'How should I learn agentic web apps?';
@@ -8,8 +9,26 @@ const TOTAL_MOVES = 10;
 let nodeCounter = 0;
 const nextNodeId = () => `n${++nodeCounter}`;
 
+/**
+ * Game mode is the timed challenge: a fixed move budget and strict alternation.
+ * Workspace mode is the open-ended tool: no budget, no turn order, so a human
+ * and an agent can both keep editing for as long as the session is useful.
+ */
+export type SessionMode = 'game' | 'workspace';
+
+function turnAdvance(state: { mode: SessionMode; movesRemaining: number }, player: PlayerType) {
+  if (state.mode === 'workspace') return {};
+  return {
+    currentPlayer: (player === 'human' ? 'agent' : 'human') as PlayerType,
+    movesRemaining: state.movesRemaining - 1,
+  };
+}
+
 interface GameStore extends GameState {
+  mode: SessionMode;
   isVoiceConnected: boolean;
+  setMode: (mode: SessionMode) => void;
+  setQuestion: (question: string) => void;
   setVoiceConnected: (connected: boolean) => void;
   plant: (label: string, player: PlayerType) => { success: boolean; message: string; nodeId?: string };
   branch: (parentId: string, label: string, kind: NodeKind, player: PlayerType) => { success: boolean; message: string; nodeId?: string };
@@ -22,16 +41,26 @@ interface GameStore extends GameState {
   checkWinCondition: () => void;
 }
 
-export const useGameStore = create<GameStore>((set, get) => ({
+export const useGameStore = create<GameStore>()(persist((set, get) => ({
   nodes: [],
   currentPlayer: 'human',
   movesRemaining: TOTAL_MOVES,
   gameStatus: 'playing',
   question: DEFAULT_QUESTION,
   history: [],
+  mode: 'workspace',
   isVoiceConnected: false,
 
   setVoiceConnected: (connected: boolean) => set({ isVoiceConnected: connected }),
+
+  setQuestion: (question: string) => set({ question }),
+
+  setMode: (mode: SessionMode) =>
+    set(
+      mode === 'game'
+        ? { mode, movesRemaining: TOTAL_MOVES, currentPlayer: 'human', gameStatus: 'playing' }
+        : { mode, gameStatus: 'playing' }
+    ),
 
   plant: (label: string, player: PlayerType) => {
     const state = get();
@@ -63,8 +92,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     set({
       nodes: [newNode],
-      currentPlayer: player === 'human' ? 'agent' : 'human',
-      movesRemaining: state.movesRemaining - 1,
+      ...turnAdvance(state, player),
       history: [...state.history, action],
     });
 
@@ -104,8 +132,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     set({
       nodes: [...state.nodes, newNode],
-      currentPlayer: player === 'human' ? 'agent' : 'human',
-      movesRemaining: state.movesRemaining - 1,
+      ...turnAdvance(state, player),
       history: [...state.history, action],
     });
 
@@ -149,8 +176,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
 
     set({
       nodes: state.nodes.filter(n => !toRemove.has(n.id)),
-      currentPlayer: player === 'human' ? 'agent' : 'human',
-      movesRemaining: state.movesRemaining - 1,
+      ...turnAdvance(state, player),
       history: [...state.history, action],
     });
 
@@ -185,8 +211,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       nodes: state.nodes.map(n => 
         n.id === nodeId ? { ...n, kind: 'gap' } : n
       ),
-      currentPlayer: player === 'human' ? 'agent' : 'human',
-      movesRemaining: state.movesRemaining - 1,
+      ...turnAdvance(state, player),
       history: [...state.history, action],
     });
 
@@ -221,8 +246,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
       nodes: state.nodes.map(n => 
         n.id === nodeId ? { ...n, kind: 'concept' } : n
       ),
-      currentPlayer: player === 'human' ? 'agent' : 'human',
-      movesRemaining: state.movesRemaining - 1,
+      ...turnAdvance(state, player),
       history: [...state.history, action],
     });
 
@@ -296,14 +320,17 @@ export const useGameStore = create<GameStore>((set, get) => ({
       currentPlayer: 'human',
       movesRemaining: TOTAL_MOVES,
       gameStatus: 'playing',
-      question: question || DEFAULT_QUESTION,
+      question: question ?? get().question ?? DEFAULT_QUESTION,
       history: [],
     });
   },
 
   checkWinCondition: () => {
     const state = get();
-    
+
+    // Workspace sessions are open-ended; there is nothing to win or lose.
+    if (state.mode === 'workspace') return;
+
     if (state.movesRemaining <= 0 || state.gameStatus !== 'playing') {
       const hasGaps = state.nodes.some(n => n.kind === 'gap');
       const hasEnoughNodes = state.nodes.length >= 5;
@@ -314,5 +341,25 @@ export const useGameStore = create<GameStore>((set, get) => ({
         set({ gameStatus: 'lost' });
       }
     }
+  },
+}), {
+  name: 'canvasquest-session',
+  partialize: state => ({
+    nodes: state.nodes,
+    question: state.question,
+    history: state.history,
+    mode: state.mode,
+    movesRemaining: state.movesRemaining,
+    currentPlayer: state.currentPlayer,
+    gameStatus: state.gameStatus,
+  }),
+  onRehydrateStorage: () => restored => {
+    // Ids are minted from a module counter, so a restored session must move the
+    // counter past everything on the board or the next node reuses an id.
+    if (!restored?.nodes.length) return;
+    nodeCounter = restored.nodes.reduce((highest, node) => {
+      const parsed = Number.parseInt(node.id.replace(/^n/, ''), 10);
+      return Number.isFinite(parsed) ? Math.max(highest, parsed) : highest;
+    }, 0);
   },
 }));

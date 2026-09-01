@@ -2,14 +2,17 @@ import { useState, useEffect } from 'react';
 import { useGameStore } from './store';
 import type { NodeKind } from './types';
 import { hasWebMCP as detectWebMCP } from './use-webmcp';
+import GapPanel from './gap-panel';
 
 const IDLE_PASS_MS = 15000;
 
 export default function GameControls() {
   const { nodes, currentPlayer, movesRemaining, gameStatus, question } = useGameStore();
-  const { plant, branch, prune, markGap, markClear, undoLastMove, passTurn, resetGame } = useGameStore();
+  const { plant, branch, prune, markGap, markClear, undoLastMove, passTurn, resetGame, setQuestion } = useGameStore();
   const hasWebMCP = detectWebMCP();
   const isVoiceConnected = useGameStore(state => state.isVoiceConnected);
+  const mode = useGameStore(state => state.mode);
+  const isGame = mode === 'game';
 
   const [selectedNodeId, setSelectedNodeId] = useState<string>('');
   const [newLabel, setNewLabel] = useState('');
@@ -103,10 +106,10 @@ export default function GameControls() {
   // hand the turn straight back. A live agent keeps its turn.
   const hasAgent = hasWebMCP || isVoiceConnected;
   useEffect(() => {
-    if (hasAgent || currentPlayer !== 'agent' || gameStatus !== 'playing') return;
+    if (!isGame || hasAgent || currentPlayer !== 'agent' || gameStatus !== 'playing') return;
     const timer = setTimeout(handleSkipAgent, 1000);
     return () => clearTimeout(timer);
-  }, [hasAgent, currentPlayer, gameStatus]);
+  }, [isGame, hasAgent, currentPlayer, gameStatus]);
 
   const handlePass = () => {
     const result = passTurn();
@@ -116,13 +119,13 @@ export default function GameControls() {
   // A quiet human should not stall the board. After a spell of inactivity the
   // turn goes to the agent on its own, which is how it ends up playing twice.
   useEffect(() => {
-    if (!isVoiceConnected || currentPlayer !== 'human' || gameStatus !== 'playing') return;
+    if (!isGame || !isVoiceConnected || currentPlayer !== 'human' || gameStatus !== 'playing') return;
     const timer = setTimeout(() => {
       passTurn();
       showFeedback('You were idle, so the agent takes this turn');
     }, IDLE_PASS_MS);
     return () => clearTimeout(timer);
-  }, [isVoiceConnected, currentPlayer, gameStatus, nodes.length, newLabel, passTurn]);
+  }, [isGame, isVoiceConnected, currentPlayer, gameStatus, nodes.length, newLabel, passTurn]);
 
   return (
     <div style={{
@@ -144,24 +147,63 @@ export default function GameControls() {
         textAlign: 'center',
       }}>
         <div style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
-          {gameStatus === 'playing' ? 'CanvasQuest' : gameStatus === 'won' ? '🎉 Victory!' : '😔 Game Over'}
+          {!isGame
+            ? 'CanvasQuest'
+            : gameStatus === 'playing'
+              ? 'CanvasQuest'
+              : gameStatus === 'won'
+                ? '🎉 Victory!'
+                : '😔 Game Over'}
         </div>
-        <div style={{ fontSize: '14px', opacity: 0.9 }}>
-          Moves: {movesRemaining} | Turn: {currentPlayer}
-        </div>
+        {isGame && (
+          <div style={{ fontSize: '14px', opacity: 0.9 }}>
+            Moves: {movesRemaining} | Turn: {currentPlayer}
+          </div>
+        )}
         <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
           Nodes: {nodes.length} | Gaps: {gapCount}
         </div>
-        {gameStatus === 'playing' && (
+        {isGame && gameStatus === 'playing' && (
           <div style={{ fontSize: '12px', marginTop: '8px', opacity: 0.9 }}>
             {isWinnable ? '✨ Win condition met!' : `Need ${Math.max(0, 5 - nodes.length)} more nodes${gapCount > 0 ? ` & clear ${gapCount} gaps` : ''}`}
           </div>
         )}
+        {!isGame && (
+          <div style={{ fontSize: '12px', marginTop: '8px', opacity: 0.9 }}>
+            Open session — no move limit
+          </div>
+        )}
       </div>
 
-      <div style={{ fontSize: '13px', color: '#475569', lineHeight: '1.4' }}>
-        <strong>Question:</strong> {question}
-      </div>
+      {isGame ? (
+        <div style={{ fontSize: '13px', color: '#475569', lineHeight: '1.4' }}>
+          <strong>Question:</strong> {question}
+        </div>
+      ) : (
+        <div>
+          <label
+            htmlFor="session-question"
+            style={{ fontSize: '13px', fontWeight: 600, color: '#334155', display: 'block', marginBottom: '6px' }}
+          >
+            What are you working through?
+          </label>
+          <textarea
+            id="session-question"
+            value={question}
+            onChange={event => setQuestion(event.target.value)}
+            rows={2}
+            style={{
+              width: '100%',
+              padding: '8px',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontFamily: 'inherit',
+              resize: 'vertical',
+            }}
+          />
+        </div>
+      )}
 
       {feedback && (
         <div style={{
@@ -175,7 +217,7 @@ export default function GameControls() {
         </div>
       )}
 
-      {gameStatus === 'playing' && currentPlayer === 'agent' && (
+      {isGame && gameStatus === 'playing' && currentPlayer === 'agent' && (
         <div style={{
           background: '#fef3c7',
           color: '#92400e',
@@ -188,7 +230,7 @@ export default function GameControls() {
         </div>
       )}
 
-      {gameStatus === 'playing' && currentPlayer === 'human' && (
+      {gameStatus === 'playing' && (!isGame || currentPlayer === 'human') && (
         <>
           <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
             <label htmlFor="node-label" style={{ fontSize: '13px', fontWeight: '600', color: '#334155', display: 'block', marginBottom: '8px' }}>
@@ -344,7 +386,7 @@ export default function GameControls() {
             </>
           )}
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: isGame ? '1fr 1fr' : '1fr', gap: '8px' }}>
             <button
               onClick={handleUndo}
               style={{
@@ -360,26 +402,28 @@ export default function GameControls() {
             >
               ↶ Undo Agent
             </button>
-            <button
-              onClick={handlePass}
-              disabled={!hasAgent}
-              title={hasAgent ? 'Give this turn to the agent' : 'No agent connected'}
-              style={{
-                padding: '10px',
-                background: hasAgent ? '#0f172a' : '#cbd5e1',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                fontWeight: '600',
-                cursor: hasAgent ? 'pointer' : 'not-allowed',
-                fontSize: '13px',
-              }}
-            >
-              Pass →
-            </button>
+            {isGame && (
+              <button
+                onClick={handlePass}
+                disabled={!hasAgent}
+                title={hasAgent ? 'Give this turn to the agent' : 'No agent connected'}
+                style={{
+                  padding: '10px',
+                  background: hasAgent ? '#0f172a' : '#cbd5e1',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontWeight: '600',
+                  cursor: hasAgent ? 'pointer' : 'not-allowed',
+                  fontSize: '13px',
+                }}
+              >
+                Pass →
+              </button>
+            )}
           </div>
 
-          {isVoiceConnected && (
+          {isGame && isVoiceConnected && (
             <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', textAlign: 'center' }}>
               Idle for {IDLE_PASS_MS / 1000}s and the agent takes the turn
             </p>
@@ -387,7 +431,7 @@ export default function GameControls() {
         </>
       )}
 
-      {gameStatus !== 'playing' && (
+      {(gameStatus !== 'playing' || !isGame) && (
         <button
           onClick={handleReset}
           style={{
@@ -401,13 +445,17 @@ export default function GameControls() {
             fontSize: '14px',
           }}
         >
-          🔄 New Game
+          {isGame ? '🔄 New Game' : '🔄 Clear canvas'}
         </button>
       )}
 
-      <div style={{ fontSize: '12px', color: '#64748b', lineHeight: '1.4', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
-        <strong>Goal:</strong> Build a tree with 5+ nodes and no gaps in 10 moves
-      </div>
+      <GapPanel />
+
+      {isGame && (
+        <div style={{ fontSize: '12px', color: '#64748b', lineHeight: '1.4', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
+          <strong>Goal:</strong> Build a tree with 5+ nodes and no gaps in 10 moves
+        </div>
+      )}
     </div>
   );
 }

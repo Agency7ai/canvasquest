@@ -11,6 +11,8 @@ const VoiceAgentIsland = lazy(() => import('./voice-agent-island'));
 export default function App() {
   const { hasWebMCP } = useWebMCP();
   const isVoiceConnected = useGameStore(state => state.isVoiceConnected);
+  const mode = useGameStore(state => state.mode);
+  const setMode = useGameStore(state => state.setMode);
 
   const agentStatus = hasWebMCP
     ? 'WebMCP active'
@@ -35,8 +37,43 @@ export default function App() {
         <div>
           <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>CanvasQuest</h1>
           <p style={{ margin: '4px 0 0 0', fontSize: '13px', opacity: 0.9 }}>
-            Collaborative Learning Game with Voice Agent
+            {mode === 'game'
+              ? 'Collaborative learning game with a voice agent'
+              : 'Map what you know, and what you do not, out loud'}
           </p>
+        </div>
+
+        <div
+          role="group"
+          aria-label="Session mode"
+          style={{
+            display: 'flex',
+            gap: '2px',
+            background: 'rgba(255,255,255,0.16)',
+            padding: '3px',
+            borderRadius: '8px',
+          }}
+        >
+          {(['workspace', 'game'] as const).map(option => (
+            <button
+              key={option}
+              onClick={() => setMode(option)}
+              aria-pressed={mode === option}
+              style={{
+                border: 'none',
+                borderRadius: '6px',
+                padding: '6px 12px',
+                fontSize: '12px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                textTransform: 'capitalize',
+                background: mode === option ? 'white' : 'transparent',
+                color: mode === option ? '#4c1d95' : 'rgba(255,255,255,0.85)',
+              }}
+            >
+              {option}
+            </button>
+          ))}
         </div>
         <div
           style={{

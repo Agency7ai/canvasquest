@@ -16,6 +16,23 @@ Two agent surfaces are supported, and both go through the same tools:
 - **ElevenLabs voice** — an on-canvas voice panel connects to a public ElevenLabs
   agent that invokes the same moves as client tools.
 
+## Two modes
+
+Switch in the header.
+
+**Workspace** (default) is the open-ended tool. No move budget, no turn order,
+no win state: you and the agent both keep editing for as long as the session is
+useful. Open questions are collected in a panel you can work through, the
+session survives a reload, and you can export the result as Markdown or JSON.
+Use it to think a problem through out loud and leave with a structured artifact
+whose unresolved parts are explicit.
+
+**Game** is the timed challenge described below: ten moves, strict alternation,
+and a win condition. It is the original WebMCP Challenge entry, kept intact.
+
+Both modes use the same tools and the same canvas. The only difference is
+whether moves are rationed.
+
 ## Game Rules
 
 - **Goal**: Build a tree with at least 5 nodes and no gaps remaining
@@ -213,6 +230,17 @@ voice tools    ─┘
 `game-controls.tsx` calls the store directly as the human player; `moves.ts`
 calls the same actions as the agent player. Adding a move means adding it once
 in `moves.ts`, and both agent surfaces pick it up.
+
+### Persistence and export
+
+Workspace sessions are stored in `localStorage` under `canvasquest-session`, so
+a reload resumes where you left off. Node ids are minted from a counter, so
+rehydration advances that counter past the highest restored id rather than
+reusing one.
+
+`export.ts` renders the tree as nested Markdown bullets with gaps as unchecked
+checkboxes, plus an "Open questions" section, so a session can be pasted
+straight into notes as a to-do list. JSON export carries the raw node graph.
 
 ### Bundle
 

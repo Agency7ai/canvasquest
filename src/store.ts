@@ -15,6 +15,7 @@ const nextNodeId = () => `n${++nodeCounter}`;
  * and an agent can both keep editing for as long as the session is useful.
  */
 export type SessionMode = 'game' | 'workspace';
+export type Visualization = 'canvas' | 'forest';
 
 export interface PlantedSession {
   id: string;
@@ -35,6 +36,12 @@ interface GameStore extends GameState {
   mode: SessionMode;
   isVoiceConnected: boolean;
   selectedNodeId: string;
+  /** Which visualisation is on screen. Agents read this for context. */
+  visualization: Visualization;
+  /** In the forest, the board whose tree the camera has stepped inside. */
+  focusedTreeId: string | null;
+  setVisualization: (visualization: Visualization) => void;
+  setFocusedTreeId: (treeId: string | null) => void;
   /** Positions the human dragged, which override the computed layout. */
   positions: Record<string, { x: number; y: number }>;
   setMode: (mode: SessionMode) => void;
@@ -91,6 +98,12 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
   selectedNodeId: '',
   positions: {},
   grove: [],
+  visualization: 'canvas',
+  focusedTreeId: null,
+
+  setVisualization: (visualization: Visualization) => set({ visualization }),
+
+  setFocusedTreeId: (treeId: string | null) => set({ focusedTreeId: treeId }),
 
   // Planting keeps a copy standing in the clearing and leaves the current board
   // untouched, so the forest accumulates without interrupting the session.

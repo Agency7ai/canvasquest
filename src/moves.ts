@@ -1,4 +1,6 @@
 import { useGameStore } from './store';
+import type { Visualization } from './store';
+import { ACTIVE_BOARD_ID } from './app-meta';
 import type { NodeKind } from './types';
 
 export interface MoveResult {
@@ -26,13 +28,50 @@ export interface BoardSummary {
   movesRemaining: number;
   currentPlayer: string;
   gameStatus: string;
-  /** What the human currently has selected on the canvas, or null. */
+  /** What the human currently has selected, in either visualisation. */
   selectedNodeId: string | null;
+  /** Which visualisation is on screen. */
+  visualization: Visualization;
+  /**
+   * The root of the tree the forest camera has stepped inside, when that tree
+   * is the board being edited. Null when nothing is focused, or when the
+   * focused tree is a planted session whose nodes are not currently loaded.
+   */
+  focusedNodeId: string | null;
+  /** The focused tree itself, including planted ones that are not open. */
+  focusedTree: { id: string; label: string; isActive: boolean } | null;
   nodes: Array<{ id: string; label: string; kind: NodeKind; parentId: string | null }>;
+}
+
+function readFocus(state: ReturnType<typeof useGameStore.getState>) {
+  const { focusedTreeId } = state;
+  if (!focusedTreeId) return { focusedNodeId: null, focusedTree: null };
+
+  if (focusedTreeId === ACTIVE_BOARD_ID) {
+    const root = state.nodes.find(node => node.parentId === null);
+    return {
+      focusedNodeId: root?.id ?? null,
+      focusedTree: root
+        ? { id: ACTIVE_BOARD_ID, label: root.label, isActive: true }
+        : null,
+    };
+  }
+
+  // A planted tree is a different session; its nodes are not on the board, so
+  // there is no node id here that the other tools could resolve.
+  const planted = state.grove.find(session => session.id === focusedTreeId);
+  return {
+    focusedNodeId: null,
+    focusedTree: planted
+      ? { id: planted.id, label: planted.question, isActive: false }
+      : null,
+  };
 }
 
 export function readBoard(): BoardSummary {
   const state = useGameStore.getState();
+  const { focusedNodeId, focusedTree } = readFocus(state);
+
   return {
     question: state.question,
     totalNodes: state.nodes.length,
@@ -41,6 +80,9 @@ export function readBoard(): BoardSummary {
     currentPlayer: state.currentPlayer,
     gameStatus: state.gameStatus,
     selectedNodeId: state.selectedNodeId || null,
+    visualization: state.visualization,
+    focusedNodeId,
+    focusedTree,
     nodes: state.nodes.map(n => ({
       id: n.id,
       label: n.label,
@@ -132,13 +174,22 @@ export function applyMove(name: MoveName, input: Record<string, unknown>): MoveR
       const board = readBoard();
       const reference = typeof input.nodeId === 'string' ? input.nodeId.trim() : '';
 
-      // With no argument, report whatever the human has selected, so an agent
-      // can ask about "this one" without being told an id.
+      // With no argument, report what the human is looking at: their selection
+      // first, otherwise the tree the forest camera has stepped inside.
       if (!reference) {
-        if (!board.selectedNodeId) {
-          return { success: false, message: 'No node is currently selected.', board };
+        const implied = board.selectedNodeId ?? board.focusedNodeId;
+
+        if (!implied) {
+          return {
+            success: false,
+            message: board.focusedTree
+              ? `Nothing is selected. The camera is inside the planted session “${board.focusedTree.label}”, which is not open for editing.`
+              : 'No node is currently selected.',
+            board,
+          };
         }
-        return describeNode(board.selectedNodeId, board);
+
+        return describeNode(implied, board);
       }
 
       const nodeId = resolveNodeId(reference);

@@ -76,10 +76,32 @@ Study Tree exposes seven tools. Five are the legal moves; `get_board` and
 so a voice agent can say "branch from First Principles" instead of spelling out
 an id.
 
-`get_node_state` with no argument reports whatever the human has selected on the
-canvas, which is how an agent answers a question about "this node" without being
-told an id. Selection is read straight from the store at call time rather than
-captured in a closure or mirrored into a ref, so it cannot go stale.
+`get_node_state` with no argument reports what the human is looking at, falling
+back from `selectedNodeId` to `focusedNodeId`, which is how an agent answers a
+question about "this node" without being told an id. State is read straight from
+the store at call time rather than captured in a closure or mirrored into a ref,
+so it cannot go stale.
+
+Selection is one value shared by both visualisations: clicking a node on the
+Canvas, clicking a limb in the Forest, and the Target Node dropdown all read and
+write the same `selectedNodeId`. Focus is separate, because stepping inside a
+tree in the Forest is not the same act as selecting a node, so `get_board`
+reports both alongside which visualisation is on screen:
+
+```json
+{
+  "selectedNodeId": "n4",
+  "focusedNodeId": "n1",
+  "focusedTree": { "id": "active", "label": "How do I learn this?", "isActive": true },
+  "visualization": "forest"
+}
+```
+
+A tree in the Forest is a whole session rather than a single node, so
+`focusedNodeId` is the root of the tree that was stepped into. When that tree is
+a *planted* session rather than the one open for editing, its nodes are not
+loaded, so `focusedNodeId` is null and `focusedTree` names it instead — rather
+than returning an id the other tools could not resolve.
 
 Both agent surfaces are driven by the same table of definitions in `src/moves.ts`
 and execute through the same `applyMove` dispatcher:

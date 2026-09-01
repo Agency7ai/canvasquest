@@ -122,5 +122,43 @@ check(
     applyMove('get_board', {}).board.movesRemaining
 );
 
+console.log('\nvisualisation and forest focus');
+check('the visualisation is reported', applyMove('get_board', {}).board.visualization === 'canvas');
+
+useGameStore.setState({ visualization: 'forest', focusedTreeId: 'active', selectedNodeId: '' });
+const focused = applyMove('get_board', {});
+check('switching view is reflected', focused.board.visualization === 'forest');
+check('walking into the open tree exposes its root', focused.board.focusedNodeId === 'n1');
+check('the focused tree is named', focused.board.focusedTree?.label === 'root');
+check(
+  'with nothing selected, focus is the fallback',
+  applyMove('get_node_state', {}).node?.id === 'n1'
+);
+
+useGameStore.setState({ selectedNodeId: 'n3' });
+check(
+  'an explicit selection beats focus',
+  applyMove('get_node_state', {}).node?.id === 'n3'
+);
+
+// Walking into a planted session must not hand back a node id that the other
+// tools cannot resolve, because its nodes are not on the board.
+useGameStore.setState({
+  selectedNodeId: '',
+  focusedTreeId: 'grove-1',
+  grove: [{ id: 'grove-1', question: 'A planted question', nodes: [], plantedAt: 0 }],
+});
+const planted = applyMove('get_board', {});
+check('a planted tree yields no node id', planted.board.focusedNodeId === null);
+check('the planted tree is still named', planted.board.focusedTree?.label === 'A planted question');
+const plantedInspect = applyMove('get_node_state', {});
+check('inspecting explains the planted tree is not open', plantedInspect.success === false);
+check(
+  'and says which one it is',
+  plantedInspect.message.includes('A planted question')
+);
+
+useGameStore.setState({ visualization: 'canvas', focusedTreeId: null, grove: [] });
+
 console.log(failures === 0 ? '\nall checks passed' : `\n${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

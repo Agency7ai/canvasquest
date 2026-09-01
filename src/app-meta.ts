@@ -1,5 +1,9 @@
 export const APP_NAME = 'Study Tree';
 
+/** Board id for the session currently being edited, as opposed to one planted
+ *  in the forest. */
+export const ACTIVE_BOARD_ID = 'active';
+
 export const APP_TAGLINES = {
   game: 'Collaborative learning game with a voice agent',
   workspace: 'Map what you know, and what you do not, out loud',

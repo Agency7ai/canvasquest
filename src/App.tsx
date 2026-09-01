@@ -4,14 +4,13 @@ import GameCanvas from './game-canvas';
 import GameControls from './game-controls';
 import { useWebMCP } from './use-webmcp';
 import { useGameStore } from './store';
+import type { Visualization } from './store';
 import { APP_NAME, APP_TAGLINES, SETUP_PROMPT } from './app-meta';
 import SetupModal from './setup-modal';
 import './app.css';
 
 const VoiceAgentIsland = lazy(() => import('./voice-agent-island'));
 const ForestView = lazy(() => import('./forest-view'));
-
-type CanvasView = 'canvas' | 'forest';
 
 const segmentedGroupStyle: React.CSSProperties = {
   display: 'flex',
@@ -38,7 +37,17 @@ export default function App() {
   const isVoiceConnected = useGameStore(state => state.isVoiceConnected);
   const mode = useGameStore(state => state.mode);
   const setMode = useGameStore(state => state.setMode);
-  const [view, setView] = useState<CanvasView>('canvas');
+  // Kept in the store, not local state, so agents can read which visualisation
+  // the human is actually looking at.
+  const view = useGameStore(state => state.visualization);
+  const setVisualization = useGameStore(state => state.setVisualization);
+  const setFocusedTreeId = useGameStore(state => state.setFocusedTreeId);
+
+  const changeView = (next: Visualization) => {
+    setVisualization(next);
+    // Leaving the forest ends any walk-in.
+    if (next !== 'forest') setFocusedTreeId(null);
+  };
   const [setupState, setSetupState] = useState<{ copied: boolean } | null>(null);
 
   // Copying inside the click keeps the write within a user gesture, which
@@ -99,7 +108,7 @@ export default function App() {
             {(['canvas', 'forest'] as const).map(option => (
               <button
                 key={option}
-                onClick={() => setView(option)}
+                onClick={() => changeView(option)}
                 aria-pressed={view === option}
                 style={segmentStyle(view === option)}
               >

@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGameStore } from './store';
 import { createForestScene } from './forest/forest-scene';
 import type { EnteredTree, HoverInfo } from './forest/forest-scene';
-
-const ACTIVE_BOARD_ID = 'active';
+import { ACTIVE_BOARD_ID } from './app-meta';
 
 export default function ForestView() {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -19,6 +18,7 @@ export default function ForestView() {
   const setSelectedNodeId = useGameStore(state => state.setSelectedNodeId);
   const plantInForest = useGameStore(state => state.plantInForest);
   const openFromForest = useGameStore(state => state.openFromForest);
+  const setFocusedTreeId = useGameStore(state => state.setFocusedTreeId);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -26,15 +26,21 @@ export default function ForestView() {
     const instance = createForestScene(containerRef.current, {
       onHover: setHover,
       onSelect: setSelectedNodeId,
-      onEnterTree: setInside,
+      onEnterTree: tree => {
+        setInside(tree);
+        // Walking into a tree is distinct from selecting a node, so report it
+        // separately for agents asking what the human is looking at.
+        setFocusedTreeId(tree ? (tree.isActive ? ACTIVE_BOARD_ID : tree.id) : null);
+      },
     });
     sceneRef.current = instance;
 
     return () => {
       instance.dispose();
+      setFocusedTreeId(null);
       sceneRef.current = null;
     };
-  }, [setSelectedNodeId]);
+  }, [setSelectedNodeId, setFocusedTreeId]);
 
   // The board being worked on stands alongside every session already planted.
   const boards = useMemo(

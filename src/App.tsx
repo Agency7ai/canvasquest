@@ -7,9 +7,9 @@ import { useGameStore } from './store';
 import './app.css';
 
 const VoiceAgentIsland = lazy(() => import('./voice-agent-island'));
-const AetherView = lazy(() => import('./aether-view'));
+const ForestView = lazy(() => import('./forest-view'));
 
-type CanvasView = 'canvas' | 'aether';
+type CanvasView = 'canvas' | 'forest';
 
 const segmentedGroupStyle: React.CSSProperties = {
   display: 'flex',
@@ -82,7 +82,7 @@ export default function App() {
           </div>
 
           <div role="group" aria-label="Visualisation" style={segmentedGroupStyle}>
-            {(['canvas', 'aether'] as const).map(option => (
+            {(['canvas', 'forest'] as const).map(option => (
               <button
                 key={option}
                 onClick={() => setView(option)}
@@ -125,18 +125,18 @@ export default function App() {
                   style={{
                     width: '100%',
                     height: '100%',
-                    background: '#05060f',
+                    background: '#0d1b1e',
                     display: 'grid',
                     placeItems: 'center',
-                    color: '#475569',
+                    color: '#64748b',
                     fontSize: '13px',
                   }}
                 >
-                  Condensing…
+                  Clearing the ground…
                 </div>
               }
             >
-              <AetherView />
+              <ForestView />
             </Suspense>
           )}
           <Suspense fallback={null}>

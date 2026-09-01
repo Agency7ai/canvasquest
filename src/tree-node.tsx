@@ -1,10 +1,12 @@
 import { memo } from 'react';
 import { Handle, Position } from 'reactflow';
 import type { TreeNode, NodeKind } from './types';
+import { NODE_WIDTH } from './layout';
 
 interface TreeNodeProps {
   data: {
     node: TreeNode;
+    isSelected?: boolean;
   };
 }
 
@@ -25,7 +27,7 @@ const kindLabels: Record<NodeKind, string> = {
 };
 
 function TreeNodeComponent({ data }: TreeNodeProps) {
-  const { node } = data;
+  const { node, isSelected } = data;
   const colors = kindColors[node.kind];
 
   return (
@@ -33,14 +35,17 @@ function TreeNodeComponent({ data }: TreeNodeProps) {
       style={{
         padding: '12px 16px',
         borderRadius: '8px',
-        border: `2px solid ${colors.border}`,
+        border: `2px solid ${isSelected ? '#0f172a' : colors.border}`,
         background: colors.bg,
         color: colors.text,
-        minWidth: '160px',
-        maxWidth: '200px',
+        // Fixed width keeps the tidy layout's spacing calculation honest.
+        width: `${NODE_WIDTH}px`,
         fontSize: '14px',
         fontWeight: 500,
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        cursor: 'grab',
+        boxShadow: isSelected
+          ? '0 0 0 4px rgba(15, 23, 42, 0.28), 0 6px 12px rgba(0, 0, 0, 0.18)'
+          : '0 4px 6px rgba(0, 0, 0, 0.1)',
       }}
     >
       {node.parentId && (

@@ -6,7 +6,22 @@ export default function GapPanel() {
   const nodes = useGameStore(state => state.nodes);
   const question = useGameStore(state => state.question);
   const markClear = useGameStore(state => state.markClear);
+  const importSession = useGameStore(state => state.importSession);
   const [copied, setCopied] = useState<'markdown' | 'json' | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importError, setImportError] = useState<string | null>(null);
+
+  const handleImport = () => {
+    const result = importSession(importText);
+    if (result.success) {
+      setIsImporting(false);
+      setImportText('');
+      setImportError(null);
+    } else {
+      setImportError(result.message);
+    }
+  };
 
   const gaps = nodes.filter(node => node.kind === 'gap');
 
@@ -110,6 +125,63 @@ export default function GapPanel() {
           Download
         </button>
       </div>
+
+      <button
+        onClick={() => {
+          setIsImporting(value => !value);
+          setImportError(null);
+        }}
+        aria-expanded={isImporting}
+        style={{ ...exportButtonStyle, padding: '8px' }}
+      >
+        {isImporting ? 'Cancel import' : 'Import JSON'}
+      </button>
+
+      {isImporting && (
+        <div style={{ display: 'grid', gap: '6px' }}>
+          <label htmlFor="import-json" style={{ fontSize: '11px', color: '#64748b' }}>
+            Paste exported JSON to rebuild the canvas. This replaces the current board.
+          </label>
+          <textarea
+            id="import-json"
+            value={importText}
+            onChange={event => {
+              setImportText(event.target.value);
+              setImportError(null);
+            }}
+            rows={5}
+            placeholder='{ "question": "...", "nodes": [ ... ] }'
+            style={{
+              width: '100%',
+              padding: '8px',
+              border: `1px solid ${importError ? '#fca5a5' : '#cbd5e1'}`,
+              borderRadius: '6px',
+              fontSize: '11px',
+              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              resize: 'vertical',
+            }}
+          />
+          {importError && (
+            <p role="alert" style={{ margin: 0, fontSize: '11px', color: '#b91c1c' }}>
+              {importError}
+            </p>
+          )}
+          <button
+            onClick={handleImport}
+            disabled={!importText.trim()}
+            style={{
+              ...exportButtonStyle,
+              padding: '8px',
+              background: importText.trim() ? '#6366f1' : '#e2e8f0',
+              color: importText.trim() ? 'white' : '#94a3b8',
+              border: 'none',
+              cursor: importText.trim() ? 'pointer' : 'not-allowed',
+            }}
+          >
+            Rebuild canvas
+          </button>
+        </div>
+      )}
     </section>
   );
 }

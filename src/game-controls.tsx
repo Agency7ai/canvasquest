@@ -14,7 +14,12 @@ export default function GameControls() {
   const mode = useGameStore(state => state.mode);
   const isGame = mode === 'game';
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string>('');
+  // Selection lives in the store so clicking a node on the canvas and choosing
+  // one from this dropdown are the same act.
+  const selectedNodeId = useGameStore(state => state.selectedNodeId);
+  const setSelectedNodeId = useGameStore(state => state.setSelectedNodeId);
+  const resetLayout = useGameStore(state => state.resetLayout);
+  const hasCustomPositions = useGameStore(state => Object.keys(state.positions).length > 0);
   const [newLabel, setNewLabel] = useState('');
   const [newKind, setNewKind] = useState<NodeKind>('concept');
   const [feedback, setFeedback] = useState('');
@@ -278,6 +283,7 @@ export default function GameControls() {
                   id="parent-node"
                   value={selectedNodeId}
                   onChange={(e) => setSelectedNodeId(e.target.value)}
+                  aria-describedby="node-picker-hint"
                   style={{
                     width: '100%',
                     padding: '8px',
@@ -293,6 +299,9 @@ export default function GameControls() {
                     </option>
                   ))}
                 </select>
+                <p id="node-picker-hint" style={{ margin: '6px 0 0 0', fontSize: '11px', color: '#94a3b8' }}>
+                  Or click a node on the canvas. Drag to reposition.
+                </p>
               </div>
 
               <div>
@@ -429,6 +438,27 @@ export default function GameControls() {
             </p>
           )}
         </>
+      )}
+
+      {hasCustomPositions && (
+        <button
+          onClick={() => {
+            resetLayout();
+            showFeedback('Layout tidied');
+          }}
+          style={{
+            padding: '10px',
+            background: 'white',
+            color: '#334155',
+            border: '1px solid #cbd5e1',
+            borderRadius: '6px',
+            fontWeight: '600',
+            cursor: 'pointer',
+            fontSize: '13px',
+          }}
+        >
+          ⤢ Tidy layout
+        </button>
       )}
 
       {(gameStatus !== 'playing' || !isGame) && (

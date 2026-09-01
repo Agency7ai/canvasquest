@@ -231,6 +231,18 @@ voice tools    ─┘
 calls the same actions as the agent player. Adding a move means adding it once
 in `moves.ts`, and both agent surfaces pick it up.
 
+### Canvas interaction
+
+Nodes are laid out by a tidy-tree pass in `layout.ts`: each node is centred over
+the width of its own subtree, so sibling branches get disjoint horizontal bands
+and cannot collide however lopsided the tree grows. Drag a node and that
+position is remembered and takes precedence over the computed layout; **Tidy
+layout** discards the overrides. Clicking a node selects it for Branch, Prune,
+Mark Gap and Clear Gap, and the picker in the sidebar stays in sync with it.
+
+Run `npm run check` to verify the layout produces no overlaps and that export
+round-trips.
+
 ### Persistence and export
 
 Workspace sessions are stored in `localStorage` under `canvasquest-session`, so
@@ -241,6 +253,12 @@ reusing one.
 `export.ts` renders the tree as nested Markdown bullets with gaps as unchecked
 checkboxes, plus an "Open questions" section, so a session can be pasted
 straight into notes as a to-do list. JSON export carries the raw node graph.
+
+**Import JSON** rebuilds the canvas from previously exported JSON, which makes a
+session portable between browsers and shareable as a paste. The payload is
+validated before anything is applied: unknown node kinds, missing ids and
+parents that reference absent nodes are all rejected with a specific message
+rather than half-loading a broken board.
 
 ### Bundle
 

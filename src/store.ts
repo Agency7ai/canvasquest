@@ -27,9 +27,16 @@ function turnAdvance(state: { mode: SessionMode; movesRemaining: number }, playe
 interface GameStore extends GameState {
   mode: SessionMode;
   isVoiceConnected: boolean;
+  selectedNodeId: string;
+  /** Positions the human dragged, which override the computed layout. */
+  positions: Record<string, { x: number; y: number }>;
   setMode: (mode: SessionMode) => void;
   setQuestion: (question: string) => void;
   setVoiceConnected: (connected: boolean) => void;
+  setSelectedNodeId: (nodeId: string) => void;
+  setNodePosition: (nodeId: string, position: { x: number; y: number }) => void;
+  resetLayout: () => void;
+  importSession: (raw: string) => { success: boolean; message: string };
   plant: (label: string, player: PlayerType) => { success: boolean; message: string; nodeId?: string };
   branch: (parentId: string, label: string, kind: NodeKind, player: PlayerType) => { success: boolean; message: string; nodeId?: string };
   prune: (nodeId: string, player: PlayerType) => { success: boolean; message: string };
@@ -50,8 +57,17 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
   history: [],
   mode: 'workspace',
   isVoiceConnected: false,
+  selectedNodeId: '',
+  positions: {},
 
   setVoiceConnected: (connected: boolean) => set({ isVoiceConnected: connected }),
+
+  setSelectedNodeId: (nodeId: string) => set({ selectedNodeId: nodeId }),
+
+  setNodePosition: (nodeId, position) =>
+    set(state => ({ positions: { ...state.positions, [nodeId]: position } })),
+
+  resetLayout: () => set({ positions: {} }),
 
   setQuestion: (question: string) => set({ question }),
 
@@ -174,8 +190,13 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       timestamp: Date.now(),
     };
 
+    const positions = { ...state.positions };
+    toRemove.forEach(id => delete positions[id]);
+
     set({
       nodes: state.nodes.filter(n => !toRemove.has(n.id)),
+      positions,
+      selectedNodeId: toRemove.has(state.selectedNodeId) ? '' : state.selectedNodeId,
       ...turnAdvance(state, player),
       history: [...state.history, action],
     });
@@ -322,7 +343,68 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
       gameStatus: 'playing',
       question: question ?? get().question ?? DEFAULT_QUESTION,
       history: [],
+      positions: {},
+      selectedNodeId: '',
     });
+  },
+
+  importSession: (raw: string) => {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return { success: false, message: 'That is not valid JSON.' };
+    }
+
+    const payload = parsed as { question?: unknown; nodes?: unknown };
+    if (!Array.isArray(payload.nodes)) {
+      return { success: false, message: 'Expected an object with a "nodes" array.' };
+    }
+
+    const kinds: NodeKind[] = ['root', 'concept', 'resource', 'skill', 'gap'];
+    const imported: TreeNode[] = [];
+
+    for (const entry of payload.nodes) {
+      const node = entry as Partial<TreeNode>;
+      if (typeof node.id !== 'string' || typeof node.label !== 'string') {
+        return { success: false, message: 'Every node needs a string id and label.' };
+      }
+      if (!kinds.includes(node.kind as NodeKind)) {
+        return { success: false, message: `Unknown kind "${String(node.kind)}" on node ${node.id}.` };
+      }
+      imported.push({
+        id: node.id,
+        label: node.label,
+        kind: node.kind as NodeKind,
+        parentId: typeof node.parentId === 'string' ? node.parentId : null,
+        createdBy: node.createdBy === 'agent' ? 'agent' : 'human',
+      });
+    }
+
+    const ids = new Set(imported.map(node => node.id));
+    const orphan = imported.find(node => node.parentId !== null && !ids.has(node.parentId));
+    if (orphan) {
+      return { success: false, message: `Node ${orphan.id} references a missing parent.` };
+    }
+
+    // Ids come from a counter, so move it past everything imported or the next
+    // node created will collide with one already on the board.
+    nodeCounter = imported.reduce((highest, node) => {
+      const parsedId = Number.parseInt(node.id.replace(/^n/, ''), 10);
+      return Number.isFinite(parsedId) ? Math.max(highest, parsedId) : highest;
+    }, 0);
+
+    set({
+      nodes: imported,
+      question: typeof payload.question === 'string' ? payload.question : get().question,
+      history: [],
+      positions: {},
+      selectedNodeId: '',
+      currentPlayer: 'human',
+      gameStatus: 'playing',
+    });
+
+    return { success: true, message: `Imported ${imported.length} nodes.` };
   },
 
   checkWinCondition: () => {
@@ -352,6 +434,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     movesRemaining: state.movesRemaining,
     currentPlayer: state.currentPlayer,
     gameStatus: state.gameStatus,
+    positions: state.positions,
   }),
   onRehydrateStorage: () => restored => {
     // Ids are minted from a module counter, so a restored session must move the

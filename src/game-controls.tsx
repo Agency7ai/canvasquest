@@ -3,6 +3,7 @@ import { useGameStore } from './store';
 import type { NodeKind } from './types';
 import { hasWebMCP as detectWebMCP } from './use-webmcp';
 import GapPanel from './gap-panel';
+import { APP_NAME } from './app-meta';
 
 const IDLE_PASS_MS = 15000;
 
@@ -152,13 +153,11 @@ export default function GameControls() {
         textAlign: 'center',
       }}>
         <div style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
-          {!isGame
-            ? 'CanvasQuest'
-            : gameStatus === 'playing'
-              ? 'CanvasQuest'
-              : gameStatus === 'won'
-                ? '🎉 Victory!'
-                : '😔 Game Over'}
+          {!isGame || gameStatus === 'playing'
+            ? APP_NAME
+            : gameStatus === 'won'
+              ? '🎉 Victory!'
+              : '😔 Game Over'}
         </div>
         {isGame && (
           <div style={{ fontSize: '14px', opacity: 0.9 }}>

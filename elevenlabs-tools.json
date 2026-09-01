@@ -1,5 +1,5 @@
 {
-  "_comment": "Client tool definitions for the ElevenLabs agent that plays CanvasQuest. Paste each object into Tools > Add tool > Edit as JSON in the ElevenLabs dashboard. Names and parameter ids must match exactly: the browser looks tools up by name and reads arguments by id.",
+  "_comment": "Client tool definitions for the ElevenLabs agent that plays Study Tree. Paste each object into Tools > Add tool > Edit as JSON in the ElevenLabs dashboard. Names and parameter ids must match exactly: the browser looks tools up by name and reads arguments by id.",
   "tools": [
     {
       "type": "client",

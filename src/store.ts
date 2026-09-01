@@ -60,6 +60,25 @@ interface GameStore extends GameState {
   checkWinCondition: () => void;
 }
 
+const STORAGE_KEY = 'study-tree-session';
+const LEGACY_STORAGE_KEY = 'canvasquest-session';
+
+/** Carries a session saved under the app's previous name across the rename,
+ *  so an existing board and grove survive the update. */
+function adoptLegacySession() {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    if (localStorage.getItem(STORAGE_KEY)) return;
+
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (legacy) localStorage.setItem(STORAGE_KEY, legacy);
+  } catch {
+    // Storage can be denied in private browsing; the app works without it.
+  }
+}
+
+adoptLegacySession();
+
 export const useGameStore = create<GameStore>()(persist((set, get) => ({
   nodes: [],
   currentPlayer: 'human',
@@ -490,7 +509,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     }
   },
 }), {
-  name: 'canvasquest-session',
+  name: STORAGE_KEY,
   partialize: state => ({
     nodes: state.nodes,
     question: state.question,

@@ -4,6 +4,7 @@ import GameCanvas from './game-canvas';
 import GameControls from './game-controls';
 import { useWebMCP } from './use-webmcp';
 import { useGameStore } from './store';
+import { APP_NAME, APP_TAGLINES } from './app-meta';
 import './app.css';
 
 const VoiceAgentIsland = lazy(() => import('./voice-agent-island'));
@@ -59,11 +60,9 @@ export default function App() {
         }}
       >
         <div>
-          <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>CanvasQuest</h1>
+          <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>{APP_NAME}</h1>
           <p style={{ margin: '4px 0 0 0', fontSize: '13px', opacity: 0.9 }}>
-            {mode === 'game'
-              ? 'Collaborative learning game with a voice agent'
-              : 'Map what you know, and what you do not, out loud'}
+            {mode === 'game' ? APP_TAGLINES.game : APP_TAGLINES.workspace}
           </p>
         </div>
 

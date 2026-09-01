@@ -1,10 +1,10 @@
-# CanvasQuest
+# Study Tree
 
 A collaborative learning game where humans and voice agents work together to build a knowledge tree. Built for the WebMCP Challenge 2026.
 
-## What is CanvasQuest?
+## What is Study Tree?
 
-CanvasQuest is a turn-based game on a shared canvas where a human player and an
+Study Tree is a turn-based game on a shared canvas where a human player and an
 AI voice agent collaborate to build a learning tree. The human clicks and types;
 the agent may only change the board by calling registered tools. Voice is the
 agent's controller.
@@ -59,7 +59,7 @@ whether moves are rationed.
 
 ## Agent tools
 
-CanvasQuest exposes six tools. Five are the legal moves; `get_board` is read-only
+Study Tree exposes six tools. Five are the legal moves; `get_board` is read-only
 and does not consume a move.
 
 | Tool | Arguments | Effect |
@@ -102,7 +102,7 @@ made.
    since the browser looks tools up by name and reads arguments by id.
 4. Give the agent a system prompt along these lines:
 
-   > You are playing CanvasQuest, a turn-based game on a shared knowledge tree.
+   > You are playing Study Tree, a turn-based game on a shared knowledge tree.
    > Call `get_board` before each move to see current node ids. You and the human
    > alternate; make exactly one move per turn. Aim to finish with at least five
    > nodes and no gap nodes remaining.
@@ -286,8 +286,9 @@ against a real 36-node board.
 
 ### Persistence and export
 
-Workspace sessions are stored in `localStorage` under `canvasquest-session`, so
-a reload resumes where you left off. Node ids are minted from a counter, so
+Workspace sessions are stored in `localStorage` under `study-tree-session`, so
+a reload resumes where you left off. A session saved under the app's previous
+name is adopted on first load, so the rename does not discard existing work. Node ids are minted from a counter, so
 rehydration advances that counter past the highest restored id rather than
 reusing one.
 

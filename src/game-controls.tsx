@@ -7,6 +7,7 @@ export default function GameControls() {
   const { nodes, currentPlayer, movesRemaining, gameStatus, question } = useGameStore();
   const { plant, branch, prune, markGap, markClear, undoLastMove, resetGame } = useGameStore();
   const hasWebMCP = detectWebMCP();
+  const isVoiceConnected = useGameStore(state => state.isVoiceConnected);
 
   const [selectedNodeId, setSelectedNodeId] = useState<string>('');
   const [newLabel, setNewLabel] = useState('');
@@ -96,14 +97,14 @@ export default function GameControls() {
     showFeedback('Skipped agent turn');
   };
 
+  // With no agent connected the board would deadlock on the agent's turn, so
+  // hand the turn straight back. A live agent keeps its turn.
+  const hasAgent = hasWebMCP || isVoiceConnected;
   useEffect(() => {
-    if (!hasWebMCP && currentPlayer === 'agent' && gameStatus === 'playing') {
-      const timer = setTimeout(() => {
-        handleSkipAgent();
-      }, 1000);
-      return () => clearTimeout(timer);
-    }
-  }, [hasWebMCP, currentPlayer, gameStatus]);
+    if (hasAgent || currentPlayer !== 'agent' || gameStatus !== 'playing') return;
+    const timer = setTimeout(handleSkipAgent, 1000);
+    return () => clearTimeout(timer);
+  }, [hasAgent, currentPlayer, gameStatus]);
 
   return (
     <div style={{
@@ -156,7 +157,7 @@ export default function GameControls() {
         </div>
       )}
 
-      {gameStatus === 'playing' && currentPlayer === 'agent' && !hasWebMCP && (
+      {gameStatus === 'playing' && currentPlayer === 'agent' && (
         <div style={{
           background: '#fef3c7',
           color: '#92400e',
@@ -165,7 +166,7 @@ export default function GameControls() {
           fontSize: '13px',
           textAlign: 'center',
         }}>
-          Agent turn (skipping in 1s...)
+          {hasAgent ? "Agent's turn — waiting for a tool call" : 'No agent connected, skipping turn'}
         </div>
       )}
 

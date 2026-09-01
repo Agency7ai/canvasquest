@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   useConversation,
   useConversationClientTool,
@@ -6,6 +6,7 @@ import {
 } from '@elevenlabs/react';
 import { applyMove, readBoard } from './moves';
 import type { MoveName } from './moves';
+import { useGameStore } from './store';
 
 const AGENT_ID = import.meta.env.VITE_ELEVENLABS_AGENT_ID ?? '';
 
@@ -40,6 +41,14 @@ export default function VoiceAgent() {
 
   const { status, isSpeaking } = conversation;
   const isConnected = status === 'connected';
+
+  // The board pauses on the agent's turn only while an agent is actually
+  // present, so the rest of the app needs to know a voice agent is live.
+  const setVoiceConnected = useGameStore(state => state.setVoiceConnected);
+  useEffect(() => {
+    setVoiceConnected(isConnected);
+    return () => setVoiceConnected(false);
+  }, [isConnected, setVoiceConnected]);
 
   // Every voice tool funnels into applyMove, the same entry point the WebMCP
   // tools use, so the voice agent plays by exactly the same rules.

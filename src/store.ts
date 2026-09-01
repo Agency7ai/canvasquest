@@ -9,6 +9,8 @@ let nodeCounter = 0;
 const nextNodeId = () => `n${++nodeCounter}`;
 
 interface GameStore extends GameState {
+  isVoiceConnected: boolean;
+  setVoiceConnected: (connected: boolean) => void;
   plant: (label: string, player: PlayerType) => { success: boolean; message: string; nodeId?: string };
   branch: (parentId: string, label: string, kind: NodeKind, player: PlayerType) => { success: boolean; message: string; nodeId?: string };
   prune: (nodeId: string, player: PlayerType) => { success: boolean; message: string };
@@ -26,6 +28,9 @@ export const useGameStore = create<GameStore>((set, get) => ({
   gameStatus: 'playing',
   question: DEFAULT_QUESTION,
   history: [],
+  isVoiceConnected: false,
+
+  setVoiceConnected: (connected: boolean) => set({ isVoiceConnected: connected }),
 
   plant: (label: string, player: PlayerType) => {
     const state = get();

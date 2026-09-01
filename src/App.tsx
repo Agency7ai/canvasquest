@@ -3,12 +3,20 @@ import { ReactFlowProvider } from 'reactflow';
 import GameCanvas from './game-canvas';
 import GameControls from './game-controls';
 import { useWebMCP } from './use-webmcp';
+import { useGameStore } from './store';
 import './app.css';
 
 const VoiceAgentIsland = lazy(() => import('./voice-agent-island'));
 
 export default function App() {
   const { hasWebMCP } = useWebMCP();
+  const isVoiceConnected = useGameStore(state => state.isVoiceConnected);
+
+  const agentStatus = hasWebMCP
+    ? 'WebMCP active'
+    : isVoiceConnected
+      ? 'WebMCP off — voice agent playing'
+      : 'WebMCP off — human-only';
 
   return (
     <div style={{ width: '100vw', height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -32,7 +40,7 @@ export default function App() {
         </div>
         <div
           style={{
-            background: hasWebMCP ? '#10b981' : '#f59e0b',
+            background: hasWebMCP || isVoiceConnected ? '#10b981' : '#f59e0b',
             padding: '6px 12px',
             borderRadius: '6px',
             fontSize: '12px',
@@ -43,8 +51,8 @@ export default function App() {
             whiteSpace: 'nowrap',
           }}
         >
-          <span>{hasWebMCP ? '✓' : '⚠'}</span>
-          <span>{hasWebMCP ? 'WebMCP Active' : 'WebMCP Off - Human Only'}</span>
+          <span>{hasWebMCP || isVoiceConnected ? '✓' : '⚠'}</span>
+          <span>{agentStatus}</span>
         </div>
       </header>
 

@@ -3,9 +3,11 @@ import { useGameStore } from './store';
 import type { NodeKind } from './types';
 import { hasWebMCP as detectWebMCP } from './use-webmcp';
 
+const IDLE_PASS_MS = 15000;
+
 export default function GameControls() {
   const { nodes, currentPlayer, movesRemaining, gameStatus, question } = useGameStore();
-  const { plant, branch, prune, markGap, markClear, undoLastMove, resetGame } = useGameStore();
+  const { plant, branch, prune, markGap, markClear, undoLastMove, passTurn, resetGame } = useGameStore();
   const hasWebMCP = detectWebMCP();
   const isVoiceConnected = useGameStore(state => state.isVoiceConnected);
 
@@ -105,6 +107,22 @@ export default function GameControls() {
     const timer = setTimeout(handleSkipAgent, 1000);
     return () => clearTimeout(timer);
   }, [hasAgent, currentPlayer, gameStatus]);
+
+  const handlePass = () => {
+    const result = passTurn();
+    showFeedback(result.message);
+  };
+
+  // A quiet human should not stall the board. After a spell of inactivity the
+  // turn goes to the agent on its own, which is how it ends up playing twice.
+  useEffect(() => {
+    if (!isVoiceConnected || currentPlayer !== 'human' || gameStatus !== 'playing') return;
+    const timer = setTimeout(() => {
+      passTurn();
+      showFeedback('You were idle, so the agent takes this turn');
+    }, IDLE_PASS_MS);
+    return () => clearTimeout(timer);
+  }, [isVoiceConnected, currentPlayer, gameStatus, nodes.length, newLabel, passTurn]);
 
   return (
     <div style={{
@@ -326,21 +344,46 @@ export default function GameControls() {
             </>
           )}
 
-          <button
-            onClick={handleUndo}
-            style={{
-              padding: '10px',
-              background: '#64748b',
-              color: 'white',
-              border: 'none',
-              borderRadius: '6px',
-              fontWeight: '600',
-              cursor: 'pointer',
-              fontSize: '13px',
-            }}
-          >
-            ↶ Undo Agent
-          </button>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
+            <button
+              onClick={handleUndo}
+              style={{
+                padding: '10px',
+                background: '#64748b',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontWeight: '600',
+                cursor: 'pointer',
+                fontSize: '13px',
+              }}
+            >
+              ↶ Undo Agent
+            </button>
+            <button
+              onClick={handlePass}
+              disabled={!hasAgent}
+              title={hasAgent ? 'Give this turn to the agent' : 'No agent connected'}
+              style={{
+                padding: '10px',
+                background: hasAgent ? '#0f172a' : '#cbd5e1',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontWeight: '600',
+                cursor: hasAgent ? 'pointer' : 'not-allowed',
+                fontSize: '13px',
+              }}
+            >
+              Pass →
+            </button>
+          </div>
+
+          {isVoiceConnected && (
+            <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', textAlign: 'center' }}>
+              Idle for {IDLE_PASS_MS / 1000}s and the agent takes the turn
+            </p>
+          )}
         </>
       )}
 

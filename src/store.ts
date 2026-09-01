@@ -17,6 +17,7 @@ interface GameStore extends GameState {
   markGap: (nodeId: string, player: PlayerType) => { success: boolean; message: string };
   markClear: (nodeId: string, player: PlayerType) => { success: boolean; message: string };
   undoLastMove: () => { success: boolean; message: string };
+  passTurn: () => { success: boolean; message: string };
   resetGame: (question?: string) => void;
   checkWinCondition: () => void;
 }
@@ -272,6 +273,20 @@ export const useGameStore = create<GameStore>((set, get) => ({
     });
 
     return { success: true, message: 'Undid last agent move' };
+  },
+
+  // Yielding is not a move: it costs nothing from the budget, which is what
+  // lets the agent play several times in a row while the human stays quiet.
+  passTurn: () => {
+    const state = get();
+
+    if (state.gameStatus !== 'playing') {
+      return { success: false, message: 'Game is over' };
+    }
+
+    const next = state.currentPlayer === 'human' ? 'agent' : 'human';
+    set({ currentPlayer: next });
+    return { success: true, message: `Turn passed to ${next}` };
   },
 
   resetGame: (question?: string) => {

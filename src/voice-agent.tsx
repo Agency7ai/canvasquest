@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   useConversation,
   useConversationClientTool,
@@ -23,6 +23,7 @@ export default function VoiceAgent() {
   const [toolCalls, setToolCalls] = useState<ToolCallEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(true);
+  const isAgentActingRef = useRef(false);
 
   const controls = useConversationControls();
 
@@ -53,6 +54,9 @@ export default function VoiceAgent() {
   // Every voice tool funnels into applyMove, the same entry point the WebMCP
   // tools use, so the voice agent plays by exactly the same rules.
   const runMove = useCallback((name: MoveName, params: Record<string, unknown>) => {
+    // The tool result already reports this change back to the agent, so the
+    // board watcher below must not narrate it a second time.
+    isAgentActingRef.current = true;
     const result = applyMove(name, params ?? {});
 
     if (name !== 'get_board') {
@@ -64,6 +68,48 @@ export default function VoiceAgent() {
 
     return JSON.stringify(result);
   }, []);
+
+  // Voice reaches the agent instantly but canvas clicks do not, so changes the
+  // agent did not make are pushed to it as they happen. Without this the agent
+  // only discovers the human's moves the next time it happens to call get_board.
+  useEffect(() => {
+    if (!isConnected) return;
+
+    const initial = useGameStore.getState();
+    let previous = { moves: initial.history.length, player: initial.currentPlayer };
+    let debounce: ReturnType<typeof setTimeout> | undefined;
+
+    const unsubscribe = useGameStore.subscribe(state => {
+      const boardChanged = state.history.length !== previous.moves;
+      const turnChanged = state.currentPlayer !== previous.player;
+      if (!boardChanged && !turnChanged) return;
+      previous = { moves: state.history.length, player: state.currentPlayer };
+
+      if (isAgentActingRef.current) {
+        isAgentActingRef.current = false;
+        return;
+      }
+
+      clearTimeout(debounce);
+      debounce = setTimeout(() => {
+        const board = readBoard();
+        const lead = boardChanged
+          ? 'The human changed the board.'
+          : 'The human passed without moving.';
+        controls.sendContextualUpdate(
+          `${lead} The board is now ${JSON.stringify(board)}. ` +
+            (board.currentPlayer === 'agent'
+              ? 'It is your turn: make exactly one move now.'
+              : "It is the human's turn, so wait.")
+        );
+      }, 250);
+    });
+
+    return () => {
+      unsubscribe();
+      clearTimeout(debounce);
+    };
+  }, [isConnected, controls]);
 
   useConversationClientTool('get_board', () => runMove('get_board', {}));
   useConversationClientTool('plant', (params: Record<string, unknown>) => runMove('plant', params));

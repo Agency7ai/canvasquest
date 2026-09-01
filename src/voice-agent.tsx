@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react';
 import {
   useConversation,
   useConversationClientTool,
+  useConversationControls,
 } from '@elevenlabs/react';
 import { applyMove, readBoard } from './moves';
 import type { MoveName } from './moves';
@@ -22,8 +23,18 @@ export default function VoiceAgent() {
   const [error, setError] = useState<string | null>(null);
   const [isExpanded, setIsExpanded] = useState(true);
 
+  const controls = useConversationControls();
+
   const conversation = useConversation({
-    onConnect: () => setError(null),
+    onConnect: () => {
+      setError(null);
+      // Sent as context rather than a prompt override so the agent needs no
+      // dashboard override permissions to be usable here.
+      controls.sendContextualUpdate(
+        `The board state is: ${JSON.stringify(readBoard())}. ` +
+          'Call get_board before each move to refresh it.'
+      );
+    },
     onError: (message: unknown) => setError(String(message)),
   });
 
@@ -62,15 +73,9 @@ export default function VoiceAgent() {
     }
 
     try {
-      const board = readBoard();
       await conversation.startSession({
         agentId: AGENT_ID,
         connectionType: 'webrtc',
-        overrides: {
-          agent: {
-            firstMessage: `Let's grow the tree. The question is: ${board.question}. What should we plant first?`,
-          },
-        },
       });
     } catch (startError) {
       setError(startError instanceof Error ? startError.message : 'Could not start the voice session.');

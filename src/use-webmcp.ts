@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useSyncExternalStore } from 'react';
 import { applyMove, TOOL_DEFINITIONS } from './moves';
 import type { MoveName } from './moves';
 
@@ -32,6 +32,20 @@ export const hasWebMCP = () => typeof document.modelContext?.registerTool === 'f
 // then share a single registration instead of racing each other.
 let registrationState: 'idle' | 'pending' | 'registered' = 'idle';
 
+const listeners = new Set<() => void>();
+
+function setRegistrationState(next: typeof registrationState) {
+  registrationState = next;
+  listeners.forEach(listener => listener());
+}
+
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => void listeners.delete(listener);
+}
+
+const isRegistered = () => registrationState === 'registered';
+
 const isDuplicateRegistration = (error: unknown) =>
   error instanceof Error && /already registered/i.test(error.message);
 
@@ -62,22 +76,18 @@ async function registerTools(signal: AbortSignal): Promise<void> {
 }
 
 export function useWebMCP() {
-  const [registered, setRegistered] = useState(registrationState === 'registered');
+  const registered = useSyncExternalStore(subscribe, isRegistered, isRegistered);
 
   useEffect(() => {
-    if (!hasWebMCP() || registrationState !== 'idle') {
-      setRegistered(registrationState === 'registered');
-      return;
-    }
+    if (!hasWebMCP() || registrationState !== 'idle') return;
 
-    registrationState = 'pending';
+    setRegistrationState('pending');
     const controller = new AbortController();
 
     registerTools(controller.signal)
       .then(() => {
         if (controller.signal.aborted) return;
-        registrationState = 'registered';
-        setRegistered(true);
+        setRegistrationState('registered');
         console.log(`[WebMCP] Registered ${TOOL_DEFINITIONS.length} tools`);
       })
       .catch((error: unknown) => {
@@ -85,14 +95,14 @@ export function useWebMCP() {
         // is expected teardown, not a failure worth surfacing, and cleanup has
         // already reset the state for the next mount.
         if (controller.signal.aborted) return;
-        registrationState = 'idle';
+        setRegistrationState('idle');
         console.error('[WebMCP] Failed to register tools:', error);
       });
 
     return () => {
       // Reset synchronously: React runs this before the next mount's effect, so
       // the remount must find the state free rather than stuck on 'pending'.
-      if (registrationState === 'pending') registrationState = 'idle';
+      if (registrationState === 'pending') setRegistrationState('idle');
       controller.abort();
     };
   }, []);

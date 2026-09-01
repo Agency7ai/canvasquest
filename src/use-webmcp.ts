@@ -39,6 +39,10 @@ export function useWebMCP() {
     abortControllerRef.current = controller;
 
     const registerTools = async () => {
+      if (controller.signal.aborted) {
+        return;
+      }
+
       try {
         await document.modelContext!.registerTool!({
           name: 'plant',
@@ -223,6 +227,9 @@ export function useWebMCP() {
         registeredRef.current = true;
         console.log('[WebMCP] Tools registered successfully');
       } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          return;
+        }
         console.error('[WebMCP] Failed to register tools:', error);
       }
     };

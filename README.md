@@ -78,9 +78,11 @@ made.
 1. Create an agent in the [ElevenLabs dashboard](https://elevenlabs.io/app/agents).
 2. Leave it **public** (no authentication). A public agent connects from the
    browser with its id alone, so this app needs no API key and no backend.
-3. Add the six tools above as **client tools** on the agent, matching the names
-   and argument names exactly. Mark each one as blocking so the agent waits for
-   the result before speaking.
+3. Add the six tools above as **client tools** on the agent. Ready-to-paste
+   definitions are in [`elevenlabs-tools.json`](elevenlabs-tools.json): in the
+   dashboard choose **Tools → Add tool → Edit as JSON** and paste one object
+   from the `tools` array for each. Names and parameter ids must match exactly,
+   since the browser looks tools up by name and reads arguments by id.
 4. Give the agent a system prompt along these lines:
 
    > You are playing CanvasQuest, a turn-based game on a shared knowledge tree.

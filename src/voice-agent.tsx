@@ -59,7 +59,7 @@ export default function VoiceAgent() {
     isAgentActingRef.current = true;
     const result = applyMove(name, params ?? {});
 
-    if (name !== 'get_board') {
+    if (name !== 'get_board' && name !== 'get_node_state') {
       setToolCalls(previous => [
         { id: ++toolCallId, name, message: result.message, success: result.success },
         ...previous,
@@ -112,6 +112,9 @@ export default function VoiceAgent() {
   }, [isConnected, controls]);
 
   useConversationClientTool('get_board', () => runMove('get_board', {}));
+  useConversationClientTool('get_node_state', (params: Record<string, unknown>) =>
+    runMove('get_node_state', params)
+  );
   useConversationClientTool('plant', (params: Record<string, unknown>) => runMove('plant', params));
   useConversationClientTool('branch', (params: Record<string, unknown>) => runMove('branch', params));
   useConversationClientTool('prune', (params: Record<string, unknown>) => runMove('prune', params));

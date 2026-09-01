@@ -17,6 +17,30 @@
     },
     {
       "type": "client",
+      "name": "get_node_state",
+      "description": "Read one node in detail: its label, kind, parent, children, and whether it is selected. Omit nodeId to inspect whatever the human currently has selected on the canvas, which is how to answer questions about 'this node'.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": [
+        {
+          "id": "nodeId",
+          "type": "string",
+          "description": "A node id such as n4, or the node's exact label. Leave empty to inspect the node the human has selected.",
+          "dynamic_variable": "",
+          "required": false,
+          "constant_value": "",
+          "value_type": "llm_prompt"
+        }
+      ],
+      "dynamic_variables": { "dynamic_variable_placeholders": {} },
+      "assignments": [],
+      "interruption_mode": "allow",
+      "tool_call_sound": null,
+      "tool_call_sound_behavior": "auto",
+      "response_mocks": []
+    },
+    {
+      "type": "client",
       "name": "plant",
       "description": "Plant the root node of the learning tree. Only valid as the very first move, when the board is empty. Use the seed question as the label.",
       "expects_response": true,

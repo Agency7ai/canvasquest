@@ -5,7 +5,18 @@ export interface MoveResult {
   success: boolean;
   message: string;
   nodeId?: string;
+  node?: NodeDetail;
   board: BoardSummary;
+}
+
+export interface NodeDetail {
+  id: string;
+  label: string;
+  kind: NodeKind;
+  parentId: string | null;
+  parentLabel: string | null;
+  childIds: string[];
+  selected: boolean;
 }
 
 export interface BoardSummary {
@@ -15,6 +26,8 @@ export interface BoardSummary {
   movesRemaining: number;
   currentPlayer: string;
   gameStatus: string;
+  /** What the human currently has selected on the canvas, or null. */
+  selectedNodeId: string | null;
   nodes: Array<{ id: string; label: string; kind: NodeKind; parentId: string | null }>;
 }
 
@@ -27,6 +40,7 @@ export function readBoard(): BoardSummary {
     movesRemaining: state.movesRemaining,
     currentPlayer: state.currentPlayer,
     gameStatus: state.gameStatus,
+    selectedNodeId: state.selectedNodeId || null,
     nodes: state.nodes.map(n => ({
       id: n.id,
       label: n.label,
@@ -56,6 +70,35 @@ function resolveNodeId(reference: string): string | null {
   return null;
 }
 
+function describeNode(nodeId: string, board: BoardSummary): MoveResult {
+  const { nodes } = useGameStore.getState();
+  const node = nodes.find(candidate => candidate.id === nodeId);
+
+  if (!node) {
+    return { success: false, message: `Node not found: ${nodeId}`, board };
+  }
+
+  const parent = node.parentId
+    ? nodes.find(candidate => candidate.id === node.parentId)
+    : undefined;
+
+  return {
+    success: true,
+    message: `${node.label} (${node.kind})`,
+    nodeId: node.id,
+    node: {
+      id: node.id,
+      label: node.label,
+      kind: node.kind,
+      parentId: node.parentId,
+      parentLabel: parent?.label ?? null,
+      childIds: nodes.filter(candidate => candidate.parentId === node.id).map(child => child.id),
+      selected: node.id === board.selectedNodeId,
+    },
+    board,
+  };
+}
+
 function unresolved(reference: string): MoveResult {
   return {
     success: false,
@@ -66,6 +109,7 @@ function unresolved(reference: string): MoveResult {
 
 export type MoveName =
   | 'get_board'
+  | 'get_node_state'
   | 'plant'
   | 'branch'
   | 'prune'
@@ -83,6 +127,30 @@ export function applyMove(name: MoveName, input: Record<string, unknown>): MoveR
   switch (name) {
     case 'get_board':
       return { success: true, message: 'Current board', board: readBoard() };
+
+    case 'get_node_state': {
+      const board = readBoard();
+      const reference = typeof input.nodeId === 'string' ? input.nodeId.trim() : '';
+
+      // With no argument, report whatever the human has selected, so an agent
+      // can ask about "this one" without being told an id.
+      if (!reference) {
+        if (!board.selectedNodeId) {
+          return { success: false, message: 'No node is currently selected.', board };
+        }
+        return describeNode(board.selectedNodeId, board);
+      }
+
+      const nodeId = resolveNodeId(reference);
+      if (!nodeId) {
+        return {
+          success: false,
+          message: `Node not found: ${reference}. Call get_board for valid ids.`,
+          board,
+        };
+      }
+      return describeNode(nodeId, board);
+    }
 
     case 'plant': {
       const label = String(input.label ?? '').trim();
@@ -140,6 +208,7 @@ export interface ToolDefinition {
     type: 'object';
     properties: Record<string, unknown>;
     required?: string[];
+    additionalProperties?: boolean;
   };
 }
 
@@ -149,9 +218,26 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'get_board',
     description:
-      'Read the current board: the seed question, every node with its id, label and kind, plus moves remaining and whose turn it is. Call this before making a move so you know which node ids exist.',
+      'Read the current board: the seed question, every node with its id, label and kind, which node the human has selected, plus moves remaining and whose turn it is. Call this before making a move so you know which node ids exist.',
     readOnly: true,
-    inputSchema: { type: 'object', properties: {} },
+    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+  },
+  {
+    name: 'get_node_state',
+    description:
+      'Read one node in detail: its label, kind, parent, children, and whether it is selected. Omit nodeId to inspect whatever the human currently has selected on the canvas, which is how to answer questions about "this node".',
+    readOnly: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nodeId: {
+          type: 'string',
+          description:
+            'A node id such as "n4", or the node\'s exact label. Omit to inspect the selected node.',
+        },
+      },
+      additionalProperties: false,
+    },
   },
   {
     name: 'plant',

@@ -77,5 +77,50 @@ check('markdown renders gaps as checkboxes', markdown.includes('- [ ] a1x'));
 check('markdown lists open questions', markdown.includes('## Open questions'));
 check('markdown indents children under parents', /\n {2}- a1/.test(markdown));
 
+console.log('\nread-only inspection tools');
+const { useGameStore } = await import('../src/store');
+const { applyMove } = await import('../src/moves');
+
+useGameStore.setState({
+  nodes,
+  question,
+  selectedNodeId: '',
+  mode: 'workspace',
+  gameStatus: 'playing',
+});
+
+const boardResult = applyMove('get_board', {});
+check('get_board reports no selection as null', boardResult.board.selectedNodeId === null);
+
+const noSelection = applyMove('get_node_state', {});
+check('get_node_state fails clearly with nothing selected', noSelection.success === false);
+
+useGameStore.setState({ selectedNodeId: 'n2' });
+check(
+  'get_board reports the live selection',
+  applyMove('get_board', {}).board.selectedNodeId === 'n2'
+);
+
+const selected = applyMove('get_node_state', {});
+check('omitting nodeId returns the selected node', selected.node?.id === 'n2');
+check('the selected node is flagged as selected', selected.node?.selected === true);
+check('children are listed', selected.node?.childIds.join(',') === 'n4,n5,n6');
+
+const explicit = applyMove('get_node_state', { nodeId: 'n7' });
+check('an explicit id wins over the selection', explicit.node?.id === 'n7');
+check('a node that is not selected says so', explicit.node?.selected === false);
+check('the parent is named, not just referenced', explicit.node?.parentLabel === 'a1');
+
+check(
+  'a label works in place of an id',
+  applyMove('get_node_state', { nodeId: 'b1' }).node?.id === 'n8'
+);
+check('an unknown node fails', applyMove('get_node_state', { nodeId: 'nope' }).success === false);
+check(
+  'inspection never spends a move',
+  applyMove('get_node_state', {}).board.movesRemaining ===
+    applyMove('get_board', {}).board.movesRemaining
+);
+
 console.log(failures === 0 ? '\nall checks passed' : `\n${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

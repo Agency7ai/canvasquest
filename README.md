@@ -59,12 +59,13 @@ whether moves are rationed.
 
 ## Agent tools
 
-Study Tree exposes six tools. Five are the legal moves; `get_board` is read-only
-and does not consume a move.
+Study Tree exposes seven tools. Five are the legal moves; `get_board` and
+`get_node_state` are read-only and do not consume a move.
 
 | Tool | Arguments | Effect |
 | --- | --- | --- |
-| `get_board` | – | Returns the question, every node, moves left, whose turn |
+| `get_board` | – | Returns the question, every node, the selected node, moves left, whose turn |
+| `get_node_state` | `nodeId?` | Returns one node's label, kind, parent, children, and whether it is selected |
 | `plant` | `label` | Creates the root node (first move only) |
 | `branch` | `parentId`, `label`, `kind` | Adds a child node |
 | `prune` | `nodeId` | Removes a node and its descendants |
@@ -74,6 +75,11 @@ and does not consume a move.
 `parentId` and `nodeId` accept either a node id (`n1`, `n2`) or a node's label,
 so a voice agent can say "branch from First Principles" instead of spelling out
 an id.
+
+`get_node_state` with no argument reports whatever the human has selected on the
+canvas, which is how an agent answers a question about "this node" without being
+told an id. Selection is read straight from the store at call time rather than
+captured in a closure or mirrored into a ref, so it cannot go stale.
 
 Both agent surfaces are driven by the same table of definitions in `src/moves.ts`
 and execute through the same `applyMove` dispatcher:

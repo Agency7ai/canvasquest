@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { buildForest } from './forest-layout';
-import type { Forest, ForestTree, Limb } from './forest-layout';
-import type { NodeKind, TreeNode } from '../types';
+import type { Board, Forest, ForestTree, Limb } from './forest-layout';
+import type { NodeKind } from '../types';
 
 export interface HoverInfo {
   id: string;
@@ -13,10 +13,19 @@ export interface HoverInfo {
   y: number;
 }
 
+export interface EnteredTree {
+  id: string;
+  label: string;
+  question: string;
+  isActive: boolean;
+  nodeCount: number;
+  gapCount: number;
+}
+
 export interface ForestHandlers {
   onHover: (info: HoverInfo | null) => void;
   onSelect: (id: string) => void;
-  onEnterTree: (treeId: string | null, label: string | null) => void;
+  onEnterTree: (tree: EnteredTree | null) => void;
 }
 
 const BARK = new THREE.Color('#6b4f3a');
@@ -155,8 +164,7 @@ export function createForestScene(container: HTMLElement, handlers: ForestHandle
   const forestGroup = new THREE.Group();
   scene.add(forestGroup);
 
-  // The board's root: a sprout in the middle of the clearing that everything
-  // else grew from.
+  // Shown only on bare ground: the sprout a session starts from.
   const seedGroup = new THREE.Group();
   const seedStem = new THREE.Mesh(
     new THREE.CylinderGeometry(0.05, 0.09, 0.9, 6),
@@ -266,12 +274,11 @@ export function createForestScene(container: HTMLElement, handlers: ForestHandle
     return material;
   }
 
-  function setData(nodes: TreeNode[]) {
+  function setData(boards: Board[]) {
     disposeForest();
-    const forest: Forest = buildForest(nodes);
+    const forest: Forest = buildForest(boards);
 
-    seedGroup.visible = Boolean(forest.seed);
-    if (forest.seed) seedGroup.position.copy(forest.seed.position);
+    seedGroup.visible = forest.trees.length === 0;
 
     for (const tree of forest.trees) {
       const uniforms = {
@@ -352,24 +359,16 @@ export function createForestScene(container: HTMLElement, handlers: ForestHandle
       }
     }
 
-    if (forest.seed) {
-      const target = new THREE.Mesh(pickGeometry, pickMaterial);
-      target.position.copy(forest.seed.position).add(new THREE.Vector3(0, 1, 0));
-      target.scale.setScalar(0.8);
-      target.userData = { nodeId: forest.seed.id, treeId: null, limbOrder: 0 };
-      scene.add(target);
-      pickTargets.push(target);
-    }
-
     if (!focusedTreeId) frameForest(forest);
   }
 
   function frameForest(forest: Forest) {
-    const distance = Math.max(forest.radius * 2.6, 34);
+    const tallest = forest.trees.reduce((max, tree) => Math.max(max, tree.height), 8);
+    const distance = Math.max(forest.radius * 1.9, tallest * 3.4);
     cameraFlight = {
       from: camera.position.clone(),
-      to: new THREE.Vector3(distance * 0.32, distance * 0.42, distance),
-      look: new THREE.Vector3(0, 5, 0),
+      to: new THREE.Vector3(distance * 0.28, tallest * 0.95, distance),
+      look: new THREE.Vector3(0, tallest * 0.45, 0),
       t: 0,
     };
   }
@@ -378,14 +377,17 @@ export function createForestScene(container: HTMLElement, handlers: ForestHandle
     focusedTreeId = treeId;
 
     if (!treeId) {
-      const radius = visuals.reduce((max, visual) => Math.max(max, visual.tree.ground.length()), 10);
+      const radius = Math.max(
+        visuals.reduce((max, visual) => Math.max(max, visual.tree.ground.length()), 0),
+        14
+      );
       cameraFlight = {
         from: camera.position.clone(),
-        to: new THREE.Vector3(radius * 0.9, radius * 1.2, radius * 2.8),
-        look: new THREE.Vector3(0, 5, 0),
+        to: new THREE.Vector3(radius * 0.5, radius * 0.9, radius * 2.4),
+        look: new THREE.Vector3(0, 6, 0),
         t: 0,
       };
-      handlers.onEnterTree(null, null);
+      handlers.onEnterTree(null);
       return;
     }
 
@@ -394,16 +396,23 @@ export function createForestScene(container: HTMLElement, handlers: ForestHandle
 
     const { ground, height } = visual.tree;
     const outward = ground.clone().setY(0);
-    if (outward.lengthSq() < 0.001) outward.set(1, 0, 0);
+    if (outward.lengthSq() < 0.001) outward.set(0, 0, 1);
     outward.normalize();
 
     cameraFlight = {
       from: camera.position.clone(),
-      to: ground.clone().add(outward.multiplyScalar(height * 1.5)).setY(height * 0.85),
-      look: ground.clone().setY(height * 0.55),
+      to: ground.clone().add(outward.multiplyScalar(height * 1.35)).setY(height * 0.72),
+      look: ground.clone().setY(height * 0.5),
       t: 0,
     };
-    handlers.onEnterTree(treeId, visual.label);
+    handlers.onEnterTree({
+      id: visual.tree.id,
+      label: visual.tree.label,
+      question: visual.tree.question,
+      isActive: visual.tree.isActive,
+      nodeCount: visual.tree.nodeCount,
+      gapCount: visual.tree.gapCount,
+    });
   }
 
   function setSelected(id: string) {
@@ -457,11 +466,14 @@ export function createForestScene(container: HTMLElement, handlers: ForestHandle
   const clock = new THREE.Clock();
   const dummy = new THREE.Object3D();
   let frame = 0;
+  // Clock.getElapsedTime() consumes the delta internally, so asking for both
+  // leaves delta at zero. Take the delta and accumulate elapsed here instead.
+  let elapsed = 0;
 
   function animate() {
     frame = requestAnimationFrame(animate);
-    const elapsed = clock.getElapsedTime();
     const delta = Math.min(clock.getDelta(), 0.05);
+    elapsed += delta;
 
     seedGroup.scale.setScalar(1 + Math.sin(elapsed * 1.3) * 0.05);
     seedGroup.rotation.y = elapsed * 0.15;
@@ -529,7 +541,7 @@ export function createForestScene(container: HTMLElement, handlers: ForestHandle
       cameraFlight.t = Math.min(1, cameraFlight.t + delta * 0.9);
       const eased = 1 - Math.pow(1 - cameraFlight.t, 3);
       camera.position.lerpVectors(cameraFlight.from, cameraFlight.to, eased);
-      controls.target.lerp(cameraFlight.look, eased * 0.35);
+      controls.target.lerp(cameraFlight.look, 0.09);
       if (cameraFlight.t >= 1) cameraFlight = null;
     }
 

@@ -16,6 +16,13 @@ const nextNodeId = () => `n${++nodeCounter}`;
  */
 export type SessionMode = 'game' | 'workspace';
 
+export interface PlantedSession {
+  id: string;
+  question: string;
+  nodes: TreeNode[];
+  plantedAt: number;
+}
+
 function turnAdvance(state: { mode: SessionMode; movesRemaining: number }, player: PlayerType) {
   if (state.mode === 'workspace') return {};
   return {
@@ -37,6 +44,11 @@ interface GameStore extends GameState {
   setNodePosition: (nodeId: string, position: { x: number; y: number }) => void;
   resetLayout: () => void;
   importSession: (raw: string) => { success: boolean; message: string };
+  /** Sessions planted in the forest, each standing as its own tree. */
+  grove: PlantedSession[];
+  plantInForest: () => { success: boolean; message: string };
+  openFromForest: (sessionId: string) => { success: boolean; message: string };
+  removeFromForest: (sessionId: string) => void;
   plant: (label: string, player: PlayerType) => { success: boolean; message: string; nodeId?: string };
   branch: (parentId: string, label: string, kind: NodeKind, player: PlayerType) => { success: boolean; message: string; nodeId?: string };
   prune: (nodeId: string, player: PlayerType) => { success: boolean; message: string };
@@ -59,6 +71,59 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
   isVoiceConnected: false,
   selectedNodeId: '',
   positions: {},
+  grove: [],
+
+  // Planting keeps a copy standing in the clearing and leaves the current board
+  // untouched, so the forest accumulates without interrupting the session.
+  plantInForest: () => {
+    const state = get();
+    if (state.nodes.length === 0) {
+      return { success: false, message: 'Nothing to plant yet.' };
+    }
+
+    const existing = state.grove.findIndex(session => session.question === state.question);
+    const planted: PlantedSession = {
+      id: existing >= 0 ? state.grove[existing].id : `grove-${Date.now()}`,
+      question: state.question,
+      nodes: state.nodes.map(node => ({ ...node })),
+      plantedAt: Date.now(),
+    };
+
+    const grove = [...state.grove];
+    if (existing >= 0) grove[existing] = planted;
+    else grove.push(planted);
+
+    set({ grove });
+    return {
+      success: true,
+      message: existing >= 0 ? 'Updated this tree in the forest.' : 'Planted in the forest.',
+    };
+  },
+
+  openFromForest: (sessionId: string) => {
+    const session = get().grove.find(item => item.id === sessionId);
+    if (!session) return { success: false, message: 'That tree is no longer in the forest.' };
+
+    nodeCounter = session.nodes.reduce((highest, node) => {
+      const parsed = Number.parseInt(node.id.replace(/^n/, ''), 10);
+      return Number.isFinite(parsed) ? Math.max(highest, parsed) : highest;
+    }, 0);
+
+    set({
+      nodes: session.nodes.map(node => ({ ...node })),
+      question: session.question,
+      history: [],
+      positions: {},
+      selectedNodeId: '',
+      currentPlayer: 'human',
+      gameStatus: 'playing',
+    });
+
+    return { success: true, message: `Opened “${session.question}”.` };
+  },
+
+  removeFromForest: (sessionId: string) =>
+    set(state => ({ grove: state.grove.filter(session => session.id !== sessionId) })),
 
   setVoiceConnected: (connected: boolean) => set({ isVoiceConnected: connected }),
 
@@ -435,6 +500,7 @@ export const useGameStore = create<GameStore>()(persist((set, get) => ({
     currentPlayer: state.currentPlayer,
     gameStatus: state.gameStatus,
     positions: state.positions,
+    grove: state.grove,
   }),
   onRehydrateStorage: () => restored => {
     // Ids are minted from a module counter, so a restored session must move the

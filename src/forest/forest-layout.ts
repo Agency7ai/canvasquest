@@ -15,40 +15,58 @@ export interface Limb {
   startRadius: number;
   endRadius: number;
   isTip: boolean;
-  /** Order of appearance, so growth can run outward from the trunk. */
+  /** Order of appearance, so growth runs outward from the trunk. */
   order: number;
 }
 
 export interface ForestTree {
   id: string;
   label: string;
-  /** Where the trunk meets the ground. */
+  question: string;
+  isActive: boolean;
   ground: THREE.Vector3;
   limbs: Limb[];
   height: number;
-  swayPhase: number;
+  nodeCount: number;
+  gapCount: number;
+}
+
+export interface Board {
+  id: string;
+  question: string;
+  nodes: TreeNode[];
+  isActive: boolean;
 }
 
 export interface Forest {
   trees: ForestTree[];
-  /** The board's root: a sprout in the middle of the clearing. */
-  seed: { id: string; label: string; position: THREE.Vector3 } | null;
   radius: number;
 }
 
 const GOLDEN_ANGLE = Math.PI * (3 - Math.sqrt(5));
 
-const TRUNK_HEIGHT = 5.4;
-const TRUNK_RADIUS = 0.34;
-const LENGTH_FALLOFF = 0.74;
-const RADIUS_FALLOFF = 0.58;
+const TRUNK_HEIGHT = 7.2;
+const TRUNK_RADIUS = 0.42;
+const LENGTH_FALLOFF = 0.72;
+const RADIUS_FALLOFF = 0.56;
 
-/**
- * Grows a tree from a node and its descendants. Each generation leaves its
- * parent on a golden-angle bearing, tilting further from vertical and losing
- * length and thickness, which is what gives a branching silhouette rather than
- * a diagram with round corners.
- */
+/** Where along a parent limb a child attaches. Real branches leave the trunk at
+ *  different heights, so spreading the attachments up the parent is most of
+ *  what makes the result read as one tree instead of a starburst. */
+function attachmentPoint(
+  start: THREE.Vector3,
+  end: THREE.Vector3,
+  index: number,
+  total: number,
+  depth: number
+): THREE.Vector3 {
+  if (total === 1) return end.clone();
+  // The trunk carries branches from halfway up; thin limbs fork nearer the tip.
+  const lowest = depth === 0 ? 0.42 : 0.62;
+  const t = lowest + ((1 - lowest) * index) / Math.max(total - 1, 1);
+  return start.clone().lerp(end, t);
+}
+
 function growLimbs(
   node: TreeNode,
   childrenOf: Map<string | null, TreeNode[]>,
@@ -67,17 +85,15 @@ function growLimbs(
 
   const end = start.clone().add(direction.clone().multiplyScalar(length));
 
-  // Bow the limb: lift the midpoint along the growth direction and push it
-  // slightly sideways so no two limbs read as parallel.
   const sideways = new THREE.Vector3()
     .crossVectors(direction, new THREE.Vector3(0, 1, 0))
     .normalize()
-    .multiplyScalar(length * 0.12 * Math.sin(bearing * 2.3));
+    .multiplyScalar(length * 0.1 * Math.sin(bearing * 2.3));
   const control = start
     .clone()
     .lerp(end, 0.5)
     .add(sideways)
-    .add(new THREE.Vector3(0, length * 0.09, 0));
+    .add(new THREE.Vector3(0, length * 0.08, 0));
 
   const children = childrenOf.get(node.id) ?? [];
 
@@ -92,35 +108,38 @@ function growLimbs(
     end,
     control,
     startRadius: radius,
-    endRadius: Math.max(radius * RADIUS_FALLOFF, 0.02),
+    endRadius: Math.max(radius * RADIUS_FALLOFF, 0.018),
     isTip: children.length === 0,
     order: depth,
   });
 
   children.forEach((child, index) => {
     const childBearing = bearing + GOLDEN_ANGLE * (index + 1);
-    // Spread wider when a node has many children, so crowded forks fan out.
-    const tilt = 0.42 + Math.min(children.length, 5) * 0.07 + depth * 0.04;
+    const tilt = (depth === 0 ? 0.72 : 0.5) + Math.min(children.length, 6) * 0.035 + depth * 0.03;
 
     const axis = new THREE.Vector3(Math.cos(childBearing), 0, Math.sin(childBearing)).normalize();
     const childDirection = direction
       .clone()
-      .applyAxisAngle(axis, tilt * (index % 2 === 0 ? 1 : -0.82))
+      .applyAxisAngle(axis, tilt * (index % 2 === 0 ? 1 : -0.85))
       .normalize();
 
-    // Keep growth generally upward; limbs should not dive into the ground.
-    if (childDirection.y < 0.12) {
-      childDirection.y = 0.12;
+    if (childDirection.y < 0.16) {
+      childDirection.y = 0.16;
       childDirection.normalize();
     }
+
+    // Branches leaving lower down the trunk are longer, as on a real tree.
+    const attach = attachmentPoint(start, end, index, children.length, depth);
+    const heightAlong = start.distanceTo(attach) / Math.max(length, 0.001);
+    const childLength = length * LENGTH_FALLOFF * (1.15 - heightAlong * 0.3);
 
     growLimbs(
       child,
       childrenOf,
       treeId,
-      end,
+      attach,
       childDirection,
-      length * LENGTH_FALLOFF,
+      childLength,
       radius * RADIUS_FALLOFF,
       depth + 1,
       childBearing,
@@ -130,31 +149,28 @@ function growLimbs(
   });
 }
 
-export function buildForest(nodes: TreeNode[]): Forest {
-  const childrenOf = new Map<string | null, TreeNode[]>();
-  for (const node of nodes) {
-    const siblings = childrenOf.get(node.parentId);
-    if (siblings) siblings.push(node);
-    else childrenOf.set(node.parentId, [node]);
-  }
+/**
+ * One board is one tree: the root is the trunk, and everything below it grows
+ * off that trunk. Several boards stand together as a forest, which is how the
+ * clearing fills up as more sessions are planted.
+ */
+export function buildForest(boards: Board[]): Forest {
+  const populated = boards.filter(board => board.nodes.length > 0);
+  const count = Math.max(populated.length, 1);
+  const clearingRadius = populated.length <= 1 ? 0 : 13 + populated.length * 3.4;
 
-  const roots = childrenOf.get(null) ?? [];
-  const board = roots[0];
+  const trees: ForestTree[] = populated.map((board, index) => {
+    const childrenOf = new Map<string | null, TreeNode[]>();
+    for (const node of board.nodes) {
+      const siblings = childrenOf.get(node.parentId);
+      if (siblings) siblings.push(node);
+      else childrenOf.set(node.parentId, [node]);
+    }
 
-  // The board's root is the seed in the clearing; each of its children becomes
-  // a tree of its own. Without a root, every top-level node is its own tree.
-  const trunkNodes = board ? childrenOf.get(board.id) ?? [] : roots;
-  const seed = board
-    ? { id: board.id, label: board.label, position: new THREE.Vector3(0, 0, 0) }
-    : null;
+    const root = (childrenOf.get(null) ?? [])[0];
 
-  const count = Math.max(trunkNodes.length, 1);
-  const clearingRadius = 7 + count * 2.1;
-
-  const trees: ForestTree[] = trunkNodes.map((node, index) => {
-    // Golden angle keeps trees from lining up in rings as the forest fills in.
     const bearing = GOLDEN_ANGLE * index + 0.6;
-    const distance = clearingRadius * Math.sqrt((index + 0.6) / count);
+    const distance = populated.length <= 1 ? 0 : clearingRadius * Math.sqrt((index + 0.5) / count);
     const ground = new THREE.Vector3(
       Math.cos(bearing) * distance,
       0,
@@ -162,35 +178,40 @@ export function buildForest(nodes: TreeNode[]): Forest {
     );
 
     const limbs: Limb[] = [];
-    growLimbs(
-      node,
-      childrenOf,
-      node.id,
-      ground.clone(),
-      new THREE.Vector3(0, 1, 0),
-      TRUNK_HEIGHT,
-      TRUNK_RADIUS,
-      0,
-      bearing,
-      new Set<string>(),
-      limbs
-    );
+    if (root) {
+      // Bigger boards grow taller trunks, so a well-tended session stands out.
+      const scale = 0.8 + Math.min(board.nodes.length, 40) / 40;
+      growLimbs(
+        root,
+        childrenOf,
+        board.id,
+        ground.clone(),
+        new THREE.Vector3(0, 1, 0),
+        TRUNK_HEIGHT * scale,
+        TRUNK_RADIUS * (0.75 + scale * 0.25),
+        0,
+        bearing,
+        new Set<string>(),
+        limbs
+      );
+    }
 
     limbs.forEach((limb, limbIndex) => {
       limb.order = limbIndex;
     });
 
-    const height = limbs.reduce((tallest, limb) => Math.max(tallest, limb.end.y), 0);
-
     return {
-      id: node.id,
-      label: node.label,
+      id: board.id,
+      label: root?.label ?? board.question,
+      question: board.question,
+      isActive: board.isActive,
       ground,
       limbs,
-      height,
-      swayPhase: index * 1.37,
+      height: limbs.reduce((tallest, limb) => Math.max(tallest, limb.end.y), 0),
+      nodeCount: board.nodes.length,
+      gapCount: board.nodes.filter(node => node.kind === 'gap').length,
     };
   });
 
-  return { trees, seed, radius: clearingRadius };
+  return { trees, radius: Math.max(clearingRadius, 16) };
 }

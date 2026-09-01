@@ -1,17 +1,24 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useGameStore } from './store';
 import { createForestScene } from './forest/forest-scene';
-import type { HoverInfo } from './forest/forest-scene';
+import type { EnteredTree, HoverInfo } from './forest/forest-scene';
+
+const ACTIVE_BOARD_ID = 'active';
 
 export default function ForestView() {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<ReturnType<typeof createForestScene> | null>(null);
   const [hover, setHover] = useState<HoverInfo | null>(null);
-  const [inside, setInside] = useState<{ id: string; label: string } | null>(null);
+  const [inside, setInside] = useState<EnteredTree | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const nodes = useGameStore(state => state.nodes);
+  const question = useGameStore(state => state.question);
+  const grove = useGameStore(state => state.grove);
   const selectedNodeId = useGameStore(state => state.selectedNodeId);
   const setSelectedNodeId = useGameStore(state => state.setSelectedNodeId);
+  const plantInForest = useGameStore(state => state.plantInForest);
+  const openFromForest = useGameStore(state => state.openFromForest);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -19,7 +26,7 @@ export default function ForestView() {
     const instance = createForestScene(containerRef.current, {
       onHover: setHover,
       onSelect: setSelectedNodeId,
-      onEnterTree: (id, label) => setInside(id && label ? { id, label } : null),
+      onEnterTree: setInside,
     });
     sceneRef.current = instance;
 
@@ -29,24 +36,40 @@ export default function ForestView() {
     };
   }, [setSelectedNodeId]);
 
+  // The board being worked on stands alongside every session already planted.
+  const boards = useMemo(
+    () => [
+      { id: ACTIVE_BOARD_ID, question, nodes, isActive: true },
+      ...grove
+        .filter(session => session.question !== question)
+        .map(session => ({
+          id: session.id,
+          question: session.question,
+          nodes: session.nodes,
+          isActive: false,
+        })),
+    ],
+    [nodes, question, grove]
+  );
+
   useEffect(() => {
-    sceneRef.current?.setData(nodes);
-  }, [nodes]);
+    sceneRef.current?.setData(boards);
+  }, [boards]);
 
   useEffect(() => {
     sceneRef.current?.setSelected(selectedNodeId);
   }, [selectedNodeId]);
 
-  const treeCount = nodes.filter(node => {
-    const root = nodes.find(candidate => candidate.parentId === null);
-    return root ? node.parentId === root.id : node.parentId === null;
-  }).length;
+  const showNotice = (message: string) => {
+    setNotice(message);
+    setTimeout(() => setNotice(null), 2600);
+  };
 
   return (
     <div style={{ position: 'relative', width: '100%', height: '100%', background: '#0d1b1e' }}>
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />
 
-      {nodes.length === 0 && (
+      {nodes.length === 0 && grove.length === 0 && (
         <div
           style={{
             position: 'absolute',
@@ -60,54 +83,51 @@ export default function ForestView() {
             padding: '24px',
           }}
         >
-          Bare ground. Plant a root and the first sprout appears here.
+          Bare ground. Plant a root and this sprout becomes your first tree.
         </div>
       )}
 
-      <div
-        style={{
-          position: 'absolute',
-          left: '16px',
-          top: '16px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '8px',
-          alignItems: 'flex-start',
-        }}
-      >
-        <p
-          style={{
-            margin: 0,
-            color: 'rgba(226, 232, 240, 0.8)',
-            fontSize: '11px',
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
-            pointerEvents: 'none',
-            textShadow: '0 1px 3px rgba(0,0,0,0.6)',
-          }}
-        >
+      <div style={overlayStyle}>
+        <p style={captionStyle}>
           {inside
-            ? `Inside “${inside.label}”`
-            : `${treeCount} ${treeCount === 1 ? 'tree' : 'trees'} · click one to walk in`}
+            ? `Inside “${inside.label}” · ${inside.nodeCount} nodes · ${inside.gapCount} unbloomed`
+            : `${boards.filter(board => board.nodes.length > 0).length} in the clearing · click a tree to walk in`}
         </p>
 
-        {inside && (
-          <button
-            onClick={() => sceneRef.current?.focusTree(null)}
-            style={{
-              background: 'rgba(15, 30, 25, 0.78)',
-              color: '#e2e8f0',
-              border: '1px solid rgba(148, 163, 184, 0.4)',
-              borderRadius: '999px',
-              padding: '6px 14px',
-              fontSize: '12px',
-              fontWeight: 600,
-              cursor: 'pointer',
-              backdropFilter: 'blur(6px)',
-            }}
-          >
-            ← Back to the forest
-          </button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          {inside && (
+            <button onClick={() => sceneRef.current?.focusTree(null)} style={pillStyle}>
+              ← Back to the forest
+            </button>
+          )}
+
+          {inside && !inside.isActive && (
+            <button
+              onClick={() => {
+                const result = openFromForest(inside.id);
+                showNotice(result.message);
+                if (result.success) sceneRef.current?.focusTree(null);
+              }}
+              style={{ ...pillStyle, background: 'rgba(52, 121, 74, 0.85)' }}
+            >
+              Tend this tree
+            </button>
+          )}
+
+          {!inside && nodes.length > 0 && (
+            <button
+              onClick={() => showNotice(plantInForest().message)}
+              style={{ ...pillStyle, background: 'rgba(52, 121, 74, 0.85)' }}
+            >
+              Plant this session in the forest
+            </button>
+          )}
+        </div>
+
+        {notice && (
+          <p role="status" style={{ ...captionStyle, color: '#bbf7d0', textTransform: 'none' }}>
+            {notice}
+          </p>
         )}
       </div>
 
@@ -153,3 +173,36 @@ export default function ForestView() {
     </div>
   );
 }
+
+const overlayStyle: React.CSSProperties = {
+  position: 'absolute',
+  left: '16px',
+  top: '16px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '8px',
+  alignItems: 'flex-start',
+  maxWidth: 'calc(100% - 32px)',
+};
+
+const captionStyle: React.CSSProperties = {
+  margin: 0,
+  color: 'rgba(226, 232, 240, 0.82)',
+  fontSize: '11px',
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+  pointerEvents: 'none',
+  textShadow: '0 1px 3px rgba(0,0,0,0.6)',
+};
+
+const pillStyle: React.CSSProperties = {
+  background: 'rgba(15, 30, 25, 0.78)',
+  color: '#e2e8f0',
+  border: '1px solid rgba(148, 163, 184, 0.4)',
+  borderRadius: '999px',
+  padding: '6px 14px',
+  fontSize: '12px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  backdropFilter: 'blur(6px)',
+};

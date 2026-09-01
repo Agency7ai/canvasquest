@@ -215,6 +215,10 @@ npm run preview
 - `game-canvas.tsx` — React Flow canvas
 - `game-controls.tsx` — human player controls
 - `tree-node.tsx` — custom React Flow node
+- `layout.ts` — tidy-tree layout for the 2D canvas
+- `forest-view.tsx` — the 3D view and its overlay
+- `forest/forest-layout.ts` — grows limb geometry from a board
+- `forest/forest-scene.ts` — Three.js scene, growth shader, camera
 
 ### Tools vs UI
 
@@ -236,20 +240,34 @@ in `moves.ts`, and both agent surfaces pick it up.
 **Canvas** is the working view: React Flow, draggable nodes, the picker, precise
 editing.
 
-**Aether** is the same graph as a Three.js organism. It is deliberately not a
-tidy diagram. Children are cast off their parent along the golden angle so no
-two branches share a bearing, each generation leans further from vertical, and
-the whole form drifts and breathes on a slow cycle with every node phase-shifted
-so it ripples rather than pulsing in unison. Light travels along the filaments,
-so the structure reads as conducting something rather than as wiring.
+**Forest** is the same graph grown in Three.js. One board is one tree: the root
+node is the trunk, and its children leave that trunk at staggered heights rather
+than all bursting from the top, which is most of what makes it read as a single
+organism instead of a starburst. Each generation leaves its parent on a
+golden-angle bearing, losing length and thickness, and branches lower on the
+trunk run longer, as on a real tree.
 
-Unresolved gaps are the one unstable element: they flicker at a frequency
-nothing else in the scene shares, and they keep flickering until they are
-resolved. The aim is that an unanswered question is visibly restless.
+Growth is animated in the vertex shader: every vertex telescopes out from its
+limb's origin, so adding a node **extends a new branch** over about a second
+instead of popping a shape into existence. Completed growth is remembered, so
+only the new wood grows when the board changes. Wind sways the higher limbs more
+than the trunk, and leaves open only once their limb has finished extending.
 
-Hover a light for its label, click to select it — selection is shared with the
-Canvas view, so you can pick a node in Aether and prune it from the sidebar.
-Drag to orbit, scroll to zoom.
+An unresolved gap is bare grey wood carrying a bud that swells and eases back
+without ever opening. Resolving the gap lets the branch leaf out, so an
+unanswered question is visibly a thing that has not bloomed yet.
+
+### The forest grows over time
+
+**Plant this session in the forest** keeps a copy of the current board standing
+in the clearing as its own tree, and leaves the session you are working on
+untouched. The ground fills up as you work through more questions. Walking into
+a planted tree offers **Tend this tree**, which reopens that session on the
+canvas. The grove persists to `localStorage` with everything else.
+
+Hover a limb for its label, click to select it and walk the camera in, and
+double-click to step back out. Selection is shared with the Canvas view, so a
+node picked in the Forest is the one the sidebar will prune.
 
 Three.js is lazy-loaded, so it costs nothing until you open the view.
 
@@ -262,8 +280,9 @@ position is remembered and takes precedence over the computed layout; **Tidy
 layout** discards the overrides. Clicking a node selects it for Branch, Prune,
 Mark Gap and Clear Gap, and the picker in the sidebar stays in sync with it.
 
-Run `npm run check` to verify the layout produces no overlaps and that export
-round-trips.
+Run `npm run check` to verify the 2D layout produces no overlaps, that export
+round-trips, and that the forest geometry stays connected and free of NaN
+against a real 36-node board.
 
 ### Persistence and export
 

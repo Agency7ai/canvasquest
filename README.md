@@ -135,6 +135,19 @@ Strict Mode's double mount as expected teardown rather than a failure. Each
 `execute` returns a structured JSON result containing the outcome and the full
 board, so the agent can see what changed without reading the DOM.
 
+## Quickest path: the Setup button
+
+Open the app and press **Setup** in the header. It copies this prompt:
+
+> Use WebMCP tools in this browser to inspect all available tools and tell me
+> what you can do.
+
+Paste it into Codex with this page open in its browser. The agent discovers the
+page's registered tools on its own and reports back what it can do, which is the
+fastest confirmation that the WebMCP integration is live. The dialog also states
+whether the current browser exposes WebMCP at all, so a missing integration is
+distinguishable from a broken one.
+
 ## Testing with ChatGPT (Primary Path)
 
 1. Start the dev server: `npm run dev`

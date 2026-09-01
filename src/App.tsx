@@ -4,7 +4,8 @@ import GameCanvas from './game-canvas';
 import GameControls from './game-controls';
 import { useWebMCP } from './use-webmcp';
 import { useGameStore } from './store';
-import { APP_NAME, APP_TAGLINES } from './app-meta';
+import { APP_NAME, APP_TAGLINES, SETUP_PROMPT } from './app-meta';
+import SetupModal from './setup-modal';
 import './app.css';
 
 const VoiceAgentIsland = lazy(() => import('./voice-agent-island'));
@@ -38,6 +39,20 @@ export default function App() {
   const mode = useGameStore(state => state.mode);
   const setMode = useGameStore(state => state.setMode);
   const [view, setView] = useState<CanvasView>('canvas');
+  const [setupState, setSetupState] = useState<{ copied: boolean } | null>(null);
+
+  // Copying inside the click keeps the write within a user gesture, which
+  // browsers are far happier to grant than one fired from an effect.
+  const openSetup = async () => {
+    let copied = false;
+    try {
+      await navigator.clipboard.writeText(SETUP_PROMPT);
+      copied = true;
+    } catch {
+      copied = false;
+    }
+    setSetupState({ copied });
+  };
 
   const agentStatus = hasWebMCP
     ? 'WebMCP active'
@@ -93,6 +108,24 @@ export default function App() {
             ))}
           </div>
         </div>
+        <button
+          onClick={openSetup}
+          title="Copy the prompt that makes an agent discover this page's tools"
+          style={{
+            background: 'rgba(255,255,255,0.16)',
+            color: 'white',
+            border: '1px solid rgba(255,255,255,0.35)',
+            borderRadius: '8px',
+            padding: '7px 14px',
+            fontSize: '12px',
+            fontWeight: 600,
+            cursor: 'pointer',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Setup
+        </button>
+
         <div
           style={{
             background: hasWebMCP || isVoiceConnected ? '#10b981' : '#f59e0b',
@@ -144,6 +177,14 @@ export default function App() {
         </div>
         <GameControls />
       </div>
+
+      {setupState && (
+        <SetupModal
+          copied={setupState.copied}
+          onClose={() => setSetupState(null)}
+          hasWebMCP={hasWebMCP}
+        />
+      )}
     </div>
   );
 }

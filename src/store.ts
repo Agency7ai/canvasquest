@@ -4,6 +4,10 @@ import type { GameState, TreeNode, GameAction, PlayerType, NodeKind } from './ty
 const DEFAULT_QUESTION = 'How should I learn agentic web apps?';
 const TOTAL_MOVES = 10;
 
+// Short ids so a voice agent can say and hear them reliably.
+let nodeCounter = 0;
+const nextNodeId = () => `n${++nodeCounter}`;
+
 interface GameStore extends GameState {
   plant: (label: string, player: PlayerType) => { success: boolean; message: string; nodeId?: string };
   branch: (parentId: string, label: string, kind: NodeKind, player: PlayerType) => { success: boolean; message: string; nodeId?: string };
@@ -35,7 +39,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     const newNode: TreeNode = {
-      id: `node-${Date.now()}`,
+      id: nextNodeId(),
       label,
       kind: 'root',
       parentId: null,
@@ -75,7 +79,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
     }
 
     const newNode: TreeNode = {
-      id: `node-${Date.now()}`,
+      id: nextNodeId(),
       label,
       kind,
       parentId,
@@ -266,6 +270,7 @@ export const useGameStore = create<GameStore>((set, get) => ({
   },
 
   resetGame: (question?: string) => {
+    nodeCounter = 0;
     set({
       nodes: [],
       currentPlayer: 'human',

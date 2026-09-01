@@ -1,12 +1,12 @@
 import { useState, useEffect } from 'react';
 import { useGameStore } from './store';
 import type { NodeKind } from './types';
-import { useWebMCP } from './use-webmcp';
+import { hasWebMCP as detectWebMCP } from './use-webmcp';
 
 export default function GameControls() {
   const { nodes, currentPlayer, movesRemaining, gameStatus, question } = useGameStore();
   const { plant, branch, prune, markGap, markClear, undoLastMove, resetGame } = useGameStore();
-  const { hasWebMCP } = useWebMCP();
+  const hasWebMCP = detectWebMCP();
 
   const [selectedNodeId, setSelectedNodeId] = useState<string>('');
   const [newLabel, setNewLabel] = useState('');

@@ -1,0 +1,157 @@
+{
+  "_comment": "Client tool definitions for the ElevenLabs agent that plays CanvasQuest. Paste each object into Tools > Add tool > Edit as JSON in the ElevenLabs dashboard. Names and parameter ids must match exactly: the browser looks tools up by name and reads arguments by id.",
+  "tools": [
+    {
+      "type": "client",
+      "name": "get_board",
+      "description": "Read the current board: the seed question, every node with its id, label and kind, plus moves remaining and whose turn it is. Call this before making a move so you know which node ids exist.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": [],
+      "dynamic_variables": { "dynamic_variable_placeholders": {} },
+      "assignments": [],
+      "interruption_mode": "allow",
+      "tool_call_sound": null,
+      "tool_call_sound_behavior": "auto",
+      "response_mocks": []
+    },
+    {
+      "type": "client",
+      "name": "plant",
+      "description": "Plant the root node of the learning tree. Only valid as the very first move, when the board is empty. Use the seed question as the label.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": [
+        {
+          "id": "label",
+          "type": "string",
+          "description": "Label for the root node, usually the learning question itself.",
+          "dynamic_variable": "",
+          "required": true,
+          "constant_value": "",
+          "value_type": "llm_prompt"
+        }
+      ],
+      "dynamic_variables": { "dynamic_variable_placeholders": {} },
+      "assignments": [],
+      "interruption_mode": "allow",
+      "tool_call_sound": null,
+      "tool_call_sound_behavior": "auto",
+      "response_mocks": []
+    },
+    {
+      "type": "client",
+      "name": "branch",
+      "description": "Expand an existing node with a new child node. This is the main way to grow the tree toward the win condition of five or more nodes.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": [
+        {
+          "id": "parentId",
+          "type": "string",
+          "description": "The id (for example n2) or the exact label of the node to branch from. Call get_board first to see valid ids.",
+          "dynamic_variable": "",
+          "required": true,
+          "constant_value": "",
+          "value_type": "llm_prompt"
+        },
+        {
+          "id": "label",
+          "type": "string",
+          "description": "A short label for the new node, two to five words.",
+          "dynamic_variable": "",
+          "required": true,
+          "constant_value": "",
+          "value_type": "llm_prompt"
+        },
+        {
+          "id": "kind",
+          "type": "string",
+          "description": "Exactly one of: concept, resource, skill, gap. Use concept for an idea or topic, resource for a book or course, skill for an ability to practise, gap for something still unknown.",
+          "dynamic_variable": "",
+          "required": true,
+          "constant_value": "",
+          "value_type": "llm_prompt"
+        }
+      ],
+      "dynamic_variables": { "dynamic_variable_placeholders": {} },
+      "assignments": [],
+      "interruption_mode": "allow",
+      "tool_call_sound": null,
+      "tool_call_sound_behavior": "auto",
+      "response_mocks": []
+    },
+    {
+      "type": "client",
+      "name": "prune",
+      "description": "Remove a node and all of its descendants. Use this to cut an off-topic or duplicated branch. The root cannot be pruned.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": [
+        {
+          "id": "nodeId",
+          "type": "string",
+          "description": "The id (for example n2) or the exact label of the node to remove.",
+          "dynamic_variable": "",
+          "required": true,
+          "constant_value": "",
+          "value_type": "llm_prompt"
+        }
+      ],
+      "dynamic_variables": { "dynamic_variable_placeholders": {} },
+      "assignments": [],
+      "interruption_mode": "allow",
+      "tool_call_sound": null,
+      "tool_call_sound_behavior": "auto",
+      "response_mocks": []
+    },
+    {
+      "type": "client",
+      "name": "mark_gap",
+      "description": "Flag a node as an open knowledge gap. Any remaining gap node blocks the win, so only mark what genuinely needs filling.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": [
+        {
+          "id": "nodeId",
+          "type": "string",
+          "description": "The id (for example n2) or the exact label of the node to flag.",
+          "dynamic_variable": "",
+          "required": true,
+          "constant_value": "",
+          "value_type": "llm_prompt"
+        }
+      ],
+      "dynamic_variables": { "dynamic_variable_placeholders": {} },
+      "assignments": [],
+      "interruption_mode": "allow",
+      "tool_call_sound": null,
+      "tool_call_sound_behavior": "auto",
+      "response_mocks": []
+    },
+    {
+      "type": "client",
+      "name": "mark_clear",
+      "description": "Clear the gap flag on a node once it has been addressed, turning it back into a concept. Clearing every gap is required to win.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": [
+        {
+          "id": "nodeId",
+          "type": "string",
+          "description": "The id (for example n2) or the exact label of the gap node to clear.",
+          "dynamic_variable": "",
+          "required": true,
+          "constant_value": "",
+          "value_type": "llm_prompt"
+        }
+      ],
+      "dynamic_variables": { "dynamic_variable_placeholders": {} },
+      "assignments": [],
+      "interruption_mode": "allow",
+      "tool_call_sound": null,
+      "tool_call_sound_behavior": "auto",
+      "response_mocks": []
+    }
+  ]
+}

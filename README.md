@@ -209,9 +209,9 @@ There is exactly one implementation of each move, in the Zustand store. Three
 entry points reach it:
 
 ```
-human buttons  ─┐
-WebMCP tools   ─┼─→ applyMove() ─→ store action ─→ React re-render
-voice tools    ─┘
+human buttons  ──┐
+WebMCP tools   ──┼──→ applyMove() ──→ store action ──→ React re-render
+voice tools    ──┘
 ```
 
 `game-controls.tsx` calls the store directly as the human player; `moves.ts`

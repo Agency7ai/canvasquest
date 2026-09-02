@@ -144,7 +144,7 @@ export default function GameControls() {
         textAlign: 'center',
       }}>
         <div style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
-          {gameStatus === 'playing' ? 'CanvasQuest' : gameStatus === 'won' ? 'Victory!' : 'Game Over'}
+          {gameStatus === 'playing' ? 'CanvasQuest' : gameStatus === 'won' ? '🎉 Victory!' : '😔 Game Over'}
         </div>
         <div style={{ fontSize: '14px', opacity: 0.9 }}>
           Moves: {movesRemaining} | Turn: {currentPlayer}
@@ -154,7 +154,7 @@ export default function GameControls() {
         </div>
         {gameStatus === 'playing' && (
           <div style={{ fontSize: '12px', marginTop: '8px', opacity: 0.9 }}>
-            {isWinnable ? 'Win condition met!' : `Need ${Math.max(0, 5 - nodes.length)} more nodes${gapCount > 0 ? ` & clear ${gapCount} gaps` : ''}`}
+            {isWinnable ? '✨ Win condition met!' : `Need ${Math.max(0, 5 - nodes.length)} more nodes${gapCount > 0 ? ` & clear ${gapCount} gaps` : ''}`}
           </div>
         )}
       </div>
@@ -224,7 +224,7 @@ export default function GameControls() {
                 fontSize: '14px',
               }}
             >
-              Plant Root
+              🌱 Plant Root
             </button>
           ) : (
             <>
@@ -269,10 +269,10 @@ export default function GameControls() {
                     fontSize: '14px',
                   }}
                 >
-                  <option value="concept">Concept</option>
-                  <option value="resource">Resource</option>
-                  <option value="skill">Skill</option>
-                  <option value="gap">Gap</option>
+                  <option value="concept">💡 Concept</option>
+                  <option value="resource">📚 Resource</option>
+                  <option value="skill">⚡ Skill</option>
+                  <option value="gap">❓ Gap</option>
                 </select>
               </div>
 
@@ -358,7 +358,7 @@ export default function GameControls() {
                 fontSize: '13px',
               }}
             >
-              Undo Agent
+              ↶ Undo Agent
             </button>
             <button
               onClick={handlePass}
@@ -375,7 +375,7 @@ export default function GameControls() {
                 fontSize: '13px',
               }}
             >
-              Pass
+              Pass →
             </button>
           </div>
 
@@ -401,7 +401,7 @@ export default function GameControls() {
             fontSize: '14px',
           }}
         >
-          New Game
+          🔄 New Game
         </button>
       )}
 

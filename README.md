@@ -2,6 +2,10 @@
 
 A collaborative learning game where humans and voice agents work together to build a knowledge tree. Built for the WebMCP Challenge 2026.
 
+**Developer:** [wispyco](https://github.com/wispyco)
+
+**Repo:** [Agency7ai/canvasquest](https://github.com/Agency7ai/canvasquest)
+
 ## What is CanvasQuest?
 
 CanvasQuest is a turn-based game on a shared canvas where a human player and an
@@ -205,9 +209,9 @@ There is exactly one implementation of each move, in the Zustand store. Three
 entry points reach it:
 
 ```
-human buttons  ──┐
-WebMCP tools   ──┼──→ applyMove() ──→ store action ──→ React re-render
-voice tools    ──┘
+human buttons  ─┐
+WebMCP tools   ─┼─→ applyMove() ─→ store action ─→ React re-render
+voice tools    ─┘
 ```
 
 `game-controls.tsx` calls the store directly as the human player; `moves.ts`
@@ -221,7 +225,7 @@ the board is interactive before the voice stack finishes downloading.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) file
+MIT — see [LICENSE](LICENSE). Copyright (c) 2026 [wispyco](https://github.com/wispyco) / Agency7ai.
 
 ## Challenge Submission
 

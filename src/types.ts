@@ -1,6 +1,28 @@
-export type NodeKind = 'root' | 'concept' | 'resource' | 'skill' | 'gap';
+export type NodeKind = 'root' | 'concept' | 'resource' | 'skill';
 
 export type PlayerType = 'human' | 'agent';
+
+/**
+ * setup: no question yet. opening: the agent sets the board up on its own, for
+ * free, before the human joins. playing: alternating turns with budgets.
+ * ended: the tree is finished and stands in the forest.
+ */
+export type GamePhase = 'setup' | 'opening' | 'playing' | 'ended';
+
+/** How the board is shown: the living forest, or the flat, labelled board. */
+export type Visualization = 'forest' | 'board';
+
+/** A line the agent asked the page to show and read aloud. Transient: never saved. */
+export interface Announcement {
+  /** Counts up across games, so repeating the same words still reads as new. */
+  id: number;
+  /** What the agent is doing, in its own words. */
+  summary: string;
+  /** The "your turn" line, present when the agent is handing the board over. */
+  handoff?: string;
+  /** Epoch milliseconds. */
+  at: number;
+}
 
 export interface TreeNode {
   id: string;
@@ -8,25 +30,97 @@ export interface TreeNode {
   kind: NodeKind;
   parentId: string | null;
   createdBy: PlayerType;
+  /** A gap is a flag laid over the node's real kind, never a kind of its own. */
+  isGap: boolean;
+  /** The challenge behind the gap, e.g. "How would you practise this?" */
+  gapReason?: string;
+  /** Who marked the gap. Only the human can unmark one, and only their own. */
+  gapBy?: PlayerType;
+  /** Markdown; the side panel shows its first line and the editor the whole document. */
+  note?: string;
+  url?: string;
+}
+
+/** Optional content attached to a node. Empty strings clear a field. */
+export interface NodeContent {
+  note?: string;
+  url?: string;
+}
+
+/**
+ * A change to a node's note that keeps the rest of it: text added at the end,
+ * or one passage swapped for another. How the agent co-writes with the human.
+ */
+export type NoteEdit =
+  | { mode: 'append'; text: string }
+  | { mode: 'replace'; find: string; text: string };
+
+export type ActionType = 'plant' | 'branch' | 'prune' | 'mark_gap' | 'unmark_gap' | 'annotate';
+
+export interface GameAction {
+  type: ActionType;
+  player: PlayerType;
+  timestamp: number;
+  nodeId?: string;
+  parentId?: string;
+  /** Label of the node the action touched, for logs. */
+  label?: string;
+  kind?: NodeKind;
+  /** Whether the action consumed a move; undo refunds it if so. */
+  costsMove: boolean;
+  /** Made during the agent's opening: free, but counted toward OPENING_MOVES. */
+  opening?: boolean;
+  /** Every node as it was before the action, so undo is lossless. */
+  before: TreeNode[];
 }
 
 export interface GameState {
+  question: string;
+  gamePhase: GamePhase;
   nodes: TreeNode[];
   currentPlayer: PlayerType;
-  movesRemaining: number;
-  gameStatus: 'playing' | 'won' | 'lost';
-  question: string;
+  /** Moves the human may still make. */
+  humanMoves: number;
+  /** Moves the agent may still make. */
+  agentMoves: number;
+  /** Turns yielded in a row (a pass or a skip) with no move between them. */
+  consecutivePasses: number;
+  /** Free moves the agent has made in its opening so far. */
+  openingMovesUsed: number;
   history: GameAction[];
 }
 
-export interface GameAction {
-  type: 'plant' | 'branch' | 'prune' | 'mark_gap' | 'mark_clear' | 'undo';
-  nodeId?: string;
-  parentId?: string;
-  label?: string;
-  kind?: NodeKind;
-  player: PlayerType;
-  timestamp: number;
+/** What survives a reload or a share link: the game minus transient UI state. */
+export interface SavedGame {
+  question: string;
+  nodes: TreeNode[];
+  humanMoves: number;
+  agentMoves: number;
+  currentPlayer: PlayerType;
+  gamePhase: GamePhase;
+  history: GameAction[];
+  openingMovesUsed: number;
+}
+
+/**
+ * A tree in the question index: a whole game, parked while another is on the
+ * board or being played right now. Switching trees swaps one in for another.
+ */
+export interface IndexedTree {
+  id: string;
+  game: SavedGame;
+  /** Epoch milliseconds of the last change to the game. */
+  updatedAt: number;
+}
+
+/** A finished board standing in the forest. */
+export interface PlantedTree {
+  id: string;
+  question: string;
+  nodes: TreeNode[];
+  score: number;
+  /** Epoch milliseconds when the tree was planted. */
+  plantedAt: number;
 }
 
 export interface WebMCPTool {

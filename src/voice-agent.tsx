@@ -5,24 +5,80 @@ import {
   useConversationControls,
 } from '@elevenlabs/react';
 import { applyMove, readBoard } from './moves';
-import type { MoveName } from './moves';
-import { useGameStore } from './store';
+import type { BoardSummary, MoveName } from './moves';
+import { OPENING_MOVES, describeAction, useGameStore } from './store';
+import type { GamePhase, TreeNode } from './types';
 
 const AGENT_ID = import.meta.env.VITE_ELEVENLABS_AGENT_ID ?? '';
 
-interface ToolCallEntry {
-  id: number;
-  name: MoveName;
-  message: string;
-  success: boolean;
+/** How many of the agent's recent actions the panel lists. */
+const LOG_ROWS = 5;
+
+/** How long after the human stops editing a note the agent hears about it. */
+const NOTE_UPDATE_MS = 1500;
+
+const NODE_FIELDS_APART_FROM_NOTE: Array<keyof TreeNode> = [
+  'id',
+  'label',
+  'kind',
+  'parentId',
+  'createdBy',
+  'isGap',
+  'gapReason',
+  'gapBy',
+  'url',
+];
+
+/** The nodes whose note changed, when notes are all that changed on the board. */
+function editedNotes(before: TreeNode[], after: TreeNode[]): TreeNode[] {
+  if (before.length !== after.length) return [];
+  const edited: TreeNode[] = [];
+  for (let i = 0; i < after.length; i += 1) {
+    const was = before[i];
+    const now = after[i];
+    if (NODE_FIELDS_APART_FROM_NOTE.some(key => was[key] !== now[key])) return [];
+    if (was.note !== now.note) edited.push(now);
+  }
+  return edited;
 }
 
-let toolCallId = 0;
+/** What the agent should do next, given where the game is. */
+function instructions(board: BoardSummary): string {
+  switch (board.gamePhase) {
+    case 'setup':
+      return 'No game has started. Ask the human what they want to learn, then plant the root with that question as its label.';
+    case 'opening':
+      return `You are opening the game on "${board.question}": plant the root with the question as its label if the board is empty, grow up to ${OPENING_MOVES} free branches (${board.openingMovesLeft} left), then call pass to hand over to the human.`;
+    case 'playing':
+      return board.currentPlayer === 'agent'
+        ? 'It is your turn: make exactly one move now.'
+        : "It is the human's turn, so wait.";
+    case 'ended':
+      return `The game is over with a final score of ${board.score} out of 100. Do not call any more move tools.`;
+  }
+}
+
+/** What the human just did, as far as the store can tell. */
+function describeChange(board: BoardSummary, from: GamePhase, boardChanged: boolean): string {
+  if (board.gamePhase === 'setup') return 'The human reset the game.';
+  if (board.gamePhase === 'ended') return '';
+  if (board.gamePhase !== from) {
+    if (from === 'setup') return `A new game started on "${board.question}".`;
+    if (from === 'ended') return 'The human reopened the game by undoing your last move.';
+    if (from === 'opening') return 'The opening is over.';
+    return 'The human undid one of your opening moves.';
+  }
+  if (boardChanged) return 'The human changed the board.';
+  return board.currentPlayer === 'agent'
+    ? 'The human passed without moving.'
+    : 'The human skipped your turn.';
+}
 
 export default function VoiceAgent() {
-  const [toolCalls, setToolCalls] = useState<ToolCallEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [lastToolError, setLastToolError] = useState<string | null>(null);
+  // Unconfigured, the panel is only a setup hint, so it starts out of the way.
+  const [isExpanded, setIsExpanded] = useState(AGENT_ID !== '');
   const isAgentActingRef = useRef(false);
 
   const controls = useConversationControls();
@@ -32,8 +88,9 @@ export default function VoiceAgent() {
       setError(null);
       // Sent as context rather than a prompt override so the agent needs no
       // dashboard override permissions to be usable here.
+      const board = readBoard();
       controls.sendContextualUpdate(
-        `The board state is: ${JSON.stringify(readBoard())}. ` +
+        `The board state is: ${JSON.stringify(board)}. ${instructions(board)} ` +
           'Call get_board before each move to refresh it.'
       );
     },
@@ -42,6 +99,11 @@ export default function VoiceAgent() {
 
   const { status, isSpeaking } = conversation;
   const isConnected = status === 'connected';
+
+  // The log reads from the same history the controls show, so the two panels
+  // can never disagree about what the agent did.
+  const history = useGameStore(state => state.history);
+  const recentAgentActions = history.filter(action => action.player === 'agent').slice(-LOG_ROWS).reverse();
 
   // The board pauses on the agent's turn only while an agent is actually
   // present, so the rest of the app needs to know a voice agent is live.
@@ -56,14 +118,16 @@ export default function VoiceAgent() {
   const runMove = useCallback((name: MoveName, params: Record<string, unknown>) => {
     // The tool result already reports this change back to the agent, so the
     // board watcher below must not narrate it a second time.
-    isAgentActingRef.current = true;
     const result = applyMove(name, params ?? {});
+    const readOnly = name === 'get_board' || name === 'get_node_state';
+    // An announcement changes nothing on the board, so it leaves no change of
+    // the agent's own for the watcher to skip.
+    isAgentActingRef.current = result.success && !readOnly && name !== 'announce';
 
-    if (name !== 'get_board') {
-      setToolCalls(previous => [
-        { id: ++toolCallId, name, message: result.message, success: result.success },
-        ...previous,
-      ].slice(0, 5));
+    // Successful moves show up in the shared history; only failures need a
+    // line of their own here.
+    if (!readOnly) {
+      setLastToolError(result.success ? null : `${name}: ${result.message}`);
     }
 
     return JSON.stringify(result);
@@ -76,14 +140,34 @@ export default function VoiceAgent() {
     if (!isConnected) return;
 
     const initial = useGameStore.getState();
-    let previous = { moves: initial.history.length, player: initial.currentPlayer };
+    let previous = {
+      moves: initial.history.length,
+      nodes: initial.nodes,
+      player: initial.currentPlayer,
+      phase: initial.gamePhase,
+    };
     let debounce: ReturnType<typeof setTimeout> | undefined;
 
     const unsubscribe = useGameStore.subscribe(state => {
-      const boardChanged = state.history.length !== previous.moves;
+      // A run of note edits shares one history entry, so the nodes themselves
+      // are watched too: a note being written changes nothing else.
+      const boardChanged = state.history.length !== previous.moves || state.nodes !== previous.nodes;
       const turnChanged = state.currentPlayer !== previous.player;
-      if (!boardChanged && !turnChanged) return;
-      previous = { moves: state.history.length, player: state.currentPlayer };
+      const phaseChanged = state.gamePhase !== previous.phase;
+      if (!boardChanged && !turnChanged && !phaseChanged) return;
+      const from = previous.phase;
+      // The editor saves as the human types, so a note arrives as a stream of
+      // small changes. Those get a lighter word, later, without the board.
+      const edited =
+        turnChanged || phaseChanged || state.history.length < previous.moves
+          ? []
+          : editedNotes(previous.nodes, state.nodes);
+      previous = {
+        moves: state.history.length,
+        nodes: state.nodes,
+        player: state.currentPlayer,
+        phase: state.gamePhase,
+      };
 
       if (isAgentActingRef.current) {
         isAgentActingRef.current = false;
@@ -92,17 +176,20 @@ export default function VoiceAgent() {
 
       clearTimeout(debounce);
       debounce = setTimeout(() => {
+        if (edited.length > 0) {
+          const where = edited.map(node => `"${node.label}" (${node.id})`).join(' and ');
+          controls.sendContextualUpdate(
+            `The human edited the note on ${where}. Call get_node_state to read it before writing there yourself.`,
+          );
+          return;
+        }
         const board = readBoard();
-        const lead = boardChanged
-          ? 'The human changed the board.'
-          : 'The human passed without moving.';
         controls.sendContextualUpdate(
-          `${lead} The board is now ${JSON.stringify(board)}. ` +
-            (board.currentPlayer === 'agent'
-              ? 'It is your turn: make exactly one move now.'
-              : "It is the human's turn, so wait.")
+          [describeChange(board, from, boardChanged), `The board is now ${JSON.stringify(board)}.`, instructions(board)]
+            .filter(Boolean)
+            .join(' '),
         );
-      }, 250);
+      }, edited.length > 0 ? NOTE_UPDATE_MS : 250);
     });
 
     return () => {
@@ -112,11 +199,15 @@ export default function VoiceAgent() {
   }, [isConnected, controls]);
 
   useConversationClientTool('get_board', () => runMove('get_board', {}));
+  useConversationClientTool('get_node_state', (params: Record<string, unknown>) => runMove('get_node_state', params));
   useConversationClientTool('plant', (params: Record<string, unknown>) => runMove('plant', params));
   useConversationClientTool('branch', (params: Record<string, unknown>) => runMove('branch', params));
   useConversationClientTool('prune', (params: Record<string, unknown>) => runMove('prune', params));
   useConversationClientTool('mark_gap', (params: Record<string, unknown>) => runMove('mark_gap', params));
-  useConversationClientTool('mark_clear', (params: Record<string, unknown>) => runMove('mark_clear', params));
+  useConversationClientTool('annotate', (params: Record<string, unknown>) => runMove('annotate', params));
+  useConversationClientTool('edit_note', (params: Record<string, unknown>) => runMove('edit_note', params));
+  useConversationClientTool('pass', () => runMove('pass', {}));
+  useConversationClientTool('announce', (params: Record<string, unknown>) => runMove('announce', params));
 
   const handleConnect = useCallback(async () => {
     setError(null);
@@ -218,7 +309,7 @@ export default function VoiceAgent() {
                 VITE_ELEVENLABS_AGENT_ID
               </code>{' '}
               in <code style={{ background: '#f1f5f9', padding: '1px 4px', borderRadius: '3px' }}>.env</code>{' '}
-              to let a voice agent play. See the README for the six client tools to add to your agent.
+              to let a voice agent play. See the README for the ten client tools to add to your agent.
             </p>
           ) : (
             <button
@@ -259,7 +350,23 @@ export default function VoiceAgent() {
             </p>
           )}
 
-          {toolCalls.length > 0 && (
+          {lastToolError && (
+            <p
+              style={{
+                margin: '10px 0 0 0',
+                padding: '8px',
+                background: '#fff7ed',
+                color: '#9a3412',
+                borderRadius: '6px',
+                fontSize: '12px',
+                lineHeight: 1.4,
+              }}
+            >
+              Last rejected call: {lastToolError}
+            </p>
+          )}
+
+          {recentAgentActions.length > 0 && (
             <div style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
               <div
                 style={{
@@ -274,19 +381,19 @@ export default function VoiceAgent() {
                 Agent moves
               </div>
               <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '4px' }}>
-                {toolCalls.map(call => (
+                {recentAgentActions.map(action => (
                   <li
-                    key={call.id}
+                    key={action.timestamp}
                     style={{
                       fontSize: '12px',
-                      color: call.success ? '#166534' : '#b91c1c',
+                      color: '#166534',
                       display: 'flex',
                       gap: '6px',
                       alignItems: 'baseline',
                     }}
                   >
-                    <code style={{ fontSize: '11px', opacity: 0.8 }}>{call.name}</code>
-                    <span style={{ color: '#475569' }}>{call.message}</span>
+                    <code style={{ fontSize: '11px', opacity: 0.8 }}>{action.type}</code>
+                    <span style={{ color: '#475569' }}>{describeAction(action)}</span>
                   </li>
                 ))}
               </ul>

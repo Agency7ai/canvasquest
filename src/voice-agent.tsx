@@ -6,23 +6,18 @@ import {
 } from '@elevenlabs/react';
 import { applyMove, readBoard } from './moves';
 import type { MoveName } from './moves';
-import { useGameStore } from './store';
+import { describeAction, useGameStore } from './store';
 
 const AGENT_ID = import.meta.env.VITE_ELEVENLABS_AGENT_ID ?? '';
 
-interface ToolCallEntry {
-  id: number;
-  name: MoveName;
-  message: string;
-  success: boolean;
-}
-
-let toolCallId = 0;
+/** How many of the agent's recent actions the panel lists. */
+const LOG_ROWS = 5;
 
 export default function VoiceAgent() {
-  const [toolCalls, setToolCalls] = useState<ToolCallEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [lastToolError, setLastToolError] = useState<string | null>(null);
+  // Unconfigured, the panel is only a setup hint, so it starts out of the way.
+  const [isExpanded, setIsExpanded] = useState(AGENT_ID !== '');
   const isAgentActingRef = useRef(false);
 
   const controls = useConversationControls();
@@ -43,6 +38,11 @@ export default function VoiceAgent() {
   const { status, isSpeaking } = conversation;
   const isConnected = status === 'connected';
 
+  // The log reads from the same history the controls show, so the two panels
+  // can never disagree about what the agent did.
+  const history = useGameStore(state => state.history);
+  const recentAgentActions = history.filter(action => action.player === 'agent').slice(-LOG_ROWS).reverse();
+
   // The board pauses on the agent's turn only while an agent is actually
   // present, so the rest of the app needs to know a voice agent is live.
   const setVoiceConnected = useGameStore(state => state.setVoiceConnected);
@@ -59,11 +59,10 @@ export default function VoiceAgent() {
     const result = applyMove(name, params ?? {});
     isAgentActingRef.current = result.success && name !== 'get_board';
 
+    // Successful moves show up in the shared history; only failures need a
+    // line of their own here.
     if (name !== 'get_board') {
-      setToolCalls(previous => [
-        { id: ++toolCallId, name, message: result.message, success: result.success },
-        ...previous,
-      ].slice(0, 5));
+      setLastToolError(result.success ? null : `${name}: ${result.message}`);
     }
 
     return JSON.stringify(result);
@@ -279,7 +278,23 @@ export default function VoiceAgent() {
             </p>
           )}
 
-          {toolCalls.length > 0 && (
+          {lastToolError && (
+            <p
+              style={{
+                margin: '10px 0 0 0',
+                padding: '8px',
+                background: '#fff7ed',
+                color: '#9a3412',
+                borderRadius: '6px',
+                fontSize: '12px',
+                lineHeight: 1.4,
+              }}
+            >
+              Last rejected call: {lastToolError}
+            </p>
+          )}
+
+          {recentAgentActions.length > 0 && (
             <div style={{ marginTop: '12px', borderTop: '1px solid #e2e8f0', paddingTop: '10px' }}>
               <div
                 style={{
@@ -294,19 +309,19 @@ export default function VoiceAgent() {
                 Agent moves
               </div>
               <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'grid', gap: '4px' }}>
-                {toolCalls.map(call => (
+                {recentAgentActions.map(action => (
                   <li
-                    key={call.id}
+                    key={action.timestamp}
                     style={{
                       fontSize: '12px',
-                      color: call.success ? '#166534' : '#b91c1c',
+                      color: '#166534',
                       display: 'flex',
                       gap: '6px',
                       alignItems: 'baseline',
                     }}
                   >
-                    <code style={{ fontSize: '11px', opacity: 0.8 }}>{call.name}</code>
-                    <span style={{ color: '#475569' }}>{call.message}</span>
+                    <code style={{ fontSize: '11px', opacity: 0.8 }}>{action.type}</code>
+                    <span style={{ color: '#475569' }}>{describeAction(action)}</span>
                   </li>
                 ))}
               </ul>

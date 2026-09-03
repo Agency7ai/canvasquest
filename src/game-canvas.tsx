@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import ReactFlow, {
   type Node,
   type Edge,
@@ -6,47 +6,79 @@ import ReactFlow, {
   Background,
   BackgroundVariant,
   type NodeTypes,
+  useNodesInitialized,
+  useReactFlow,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { layoutTree } from './layout';
 import { computeImplicitGaps } from './scoring';
 import { useGameStore } from './store';
-import type { TreeNode as GameTreeNode } from './types';
-import TreeNodeComponent from './tree-node';
+import TreeNodeComponent, { type TreeNodeData } from './tree-node';
 
 const nodeTypes: NodeTypes = {
   treeNode: TreeNodeComponent,
 };
 
+const FIT_OPTIONS = { padding: 0.2, duration: 300 };
+/** Retry delay for the rare case where React Flow is not ready to fit yet. */
+const REFIT_DELAY_MS = 50;
+
 export default function GameCanvas() {
   const nodes = useGameStore(state => state.nodes);
+  const selectedNodeId = useGameStore(state => state.selectedNodeId);
+  const selectNode = useGameStore(state => state.selectNode);
+  const { fitView } = useReactFlow();
+  // False while freshly added nodes still lack their measured size; fitView is
+  // a no-op until every node is measured, so the effect below waits for it.
+  const nodesInitialized = useNodesInitialized();
+
+  const positions = useMemo(() => layoutTree(nodes), [nodes]);
 
   // Implicit gaps are derived, never stored: a concept with nothing concrete
   // beneath it is drawn as a gap until someone branches a resource or skill.
   const implicitGaps = useMemo(() => new Set(computeImplicitGaps(nodes)), [nodes]);
 
-  const flowNodes: Node[] = nodes.map((node) => {
-    const position = calculateNodePosition(node, nodes);
-    return {
-      id: node.id,
-      type: 'treeNode',
-      position,
-      data: { node, implicitGap: implicitGaps.has(node.id) },
-    };
-  });
+  const flowNodes: Node<TreeNodeData>[] = useMemo(
+    () =>
+      nodes.map(node => ({
+        id: node.id,
+        type: 'treeNode',
+        position: positions.get(node.id) ?? { x: 0, y: 0 },
+        selected: node.id === selectedNodeId,
+        data: { node, implicitGap: implicitGaps.has(node.id) },
+      })),
+    [nodes, positions, implicitGaps, selectedNodeId],
+  );
 
-  const flowEdges: Edge[] = nodes
-    .filter(n => n.parentId)
-    .map(n => ({
-      id: `edge-${n.id}`,
-      source: n.parentId!,
-      target: n.id,
-      type: 'smoothstep',
-      animated: n.isGap,
-      style: {
-        stroke: n.isGap ? '#ef4444' : implicitGaps.has(n.id) ? '#f59e0b' : '#64748b',
-        strokeWidth: 2,
-      },
-    }));
+  const flowEdges: Edge[] = useMemo(
+    () =>
+      nodes
+        .filter(n => n.parentId)
+        .map(n => ({
+          id: `edge-${n.id}`,
+          source: n.parentId!,
+          target: n.id,
+          type: 'smoothstep',
+          animated: n.isGap,
+          style: {
+            stroke: n.isGap ? '#ef4444' : implicitGaps.has(n.id) ? '#f59e0b' : '#64748b',
+            strokeWidth: 2,
+          },
+        })),
+    [nodes, implicitGaps],
+  );
+
+  // Whenever the layout changes (a new node, a prune, an undo, a restore) the
+  // whole tree is brought back into view.
+  useEffect(() => {
+    if (!nodesInitialized) return;
+    if (fitView(FIT_OPTIONS)) return;
+    const timer = setTimeout(() => fitView(FIT_OPTIONS), REFIT_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [nodesInitialized, positions, fitView]);
+
+  const onNodeClick = useCallback((_event: unknown, node: Node) => selectNode(node.id), [selectNode]);
+  const onPaneClick = useCallback(() => selectNode(null), [selectNode]);
 
   return (
     <div style={{ width: '100%', height: '100%' }}>
@@ -54,42 +86,20 @@ export default function GameCanvas() {
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
+        onNodeClick={onNodeClick}
+        onPaneClick={onPaneClick}
         fitView
-        minZoom={0.5}
+        minZoom={0.2}
         maxZoom={1.5}
         nodesDraggable={false}
         nodesConnectable={false}
-        elementsSelectable={true}
+        // Selection is owned by the store (selectedNodeId) rather than by
+        // React Flow, so the dropdown and the canvas always agree.
+        elementsSelectable={false}
       >
         <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>
   );
-}
-
-function calculateNodePosition(node: GameTreeNode, allNodes: GameTreeNode[]): { x: number; y: number } {
-  if (!node.parentId) {
-    return { x: 400, y: 50 };
-  }
-
-  const parent = allNodes.find(n => n.id === node.parentId);
-  if (!parent) {
-    return { x: 400, y: 50 };
-  }
-
-  const siblings = allNodes.filter(n => n.parentId === node.parentId);
-  const index = siblings.findIndex(n => n.id === node.id);
-  const totalSiblings = siblings.length;
-
-  const parentPos = calculateNodePosition(parent, allNodes);
-  
-  const horizontalSpacing = 200;
-  const verticalSpacing = 120;
-  const offset = (index - (totalSiblings - 1) / 2) * horizontalSpacing;
-
-  return {
-    x: parentPos.x + offset,
-    y: parentPos.y + verticalSpacing,
-  };
 }

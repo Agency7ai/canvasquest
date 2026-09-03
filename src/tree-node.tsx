@@ -1,13 +1,12 @@
 import { memo } from 'react';
-import { Handle, Position } from 'reactflow';
+import { Handle, Position, type NodeProps } from 'reactflow';
+import { NODE_WIDTH } from './layout';
 import type { TreeNode, NodeKind } from './types';
 
-interface TreeNodeProps {
-  data: {
-    node: TreeNode;
-    /** Derived by the canvas: a concept with no resource or skill beneath it. */
-    implicitGap?: boolean;
-  };
+export interface TreeNodeData {
+  node: TreeNode;
+  /** Derived by the canvas: a concept with no resource or skill beneath it. */
+  implicitGap?: boolean;
 }
 
 const kindColors: Record<NodeKind, { bg: string; border: string; text: string }> = {
@@ -26,8 +25,13 @@ const kindLabels: Record<NodeKind, string> = {
 
 const GAP_COLOR = '#ef4444';
 const IMPLICIT_GAP_COLOR = '#f59e0b';
+const SELECTION_COLOR = '#0f172a';
+const NOTE_PREVIEW_CHARS = 40;
 
-function TreeNodeComponent({ data }: TreeNodeProps) {
+const previewOf = (note: string) =>
+  note.length > NOTE_PREVIEW_CHARS ? `${note.slice(0, NOTE_PREVIEW_CHARS).trimEnd()}…` : note;
+
+function TreeNodeComponent({ data, selected }: NodeProps<TreeNodeData>) {
   const { node, implicitGap = false } = data;
   const colors = kindColors[node.kind];
 
@@ -49,24 +53,23 @@ function TreeNodeComponent({ data }: TreeNodeProps) {
       title={tooltip}
       style={{
         position: 'relative',
-        padding: '12px 16px',
+        boxSizing: 'border-box',
+        width: `${NODE_WIDTH}px`,
+        padding: '12px 14px',
         borderRadius: '8px',
         border,
+        outline: selected ? `3px solid ${SELECTION_COLOR}` : 'none',
+        outlineOffset: '3px',
         background: colors.bg,
         color: colors.text,
-        minWidth: '160px',
-        maxWidth: '200px',
         fontSize: '14px',
         fontWeight: 500,
-        boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+        boxShadow: selected ? '0 8px 16px rgba(0, 0, 0, 0.2)' : '0 4px 6px rgba(0, 0, 0, 0.1)',
+        cursor: 'pointer',
       }}
     >
       {node.parentId && (
-        <Handle
-          type="target"
-          position={Position.Top}
-          style={{ background: colors.border }}
-        />
+        <Handle type="target" position={Position.Top} style={{ background: colors.border }} />
       )}
 
       {node.isGap && (
@@ -92,12 +95,25 @@ function TreeNodeComponent({ data }: TreeNodeProps) {
         </span>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span style={{ fontSize: '18px' }}>{kindLabels[node.kind]}</span>
-        <div style={{ flex: 1, wordBreak: 'break-word' }}>
-          {node.label}
-        </div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+        <span style={{ fontSize: '18px', lineHeight: 1.2 }}>{kindLabels[node.kind]}</span>
+        <div style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.3 }}>{node.label}</div>
       </div>
+
+      {node.note && (
+        <div
+          style={{
+            marginTop: '4px',
+            fontSize: '11px',
+            fontWeight: 400,
+            fontStyle: 'italic',
+            opacity: 0.8,
+            wordBreak: 'break-word',
+          }}
+        >
+          {previewOf(node.note)}
+        </div>
+      )}
 
       <div
         style={{
@@ -121,14 +137,23 @@ function TreeNodeComponent({ data }: TreeNodeProps) {
         >
           {node.id}
         </code>
-        <span>by {node.createdBy}</span>
+        <span style={{ flex: 1 }}>by {node.createdBy}</span>
+        {node.url && (
+          <a
+            href={node.url}
+            target="_blank"
+            rel="noreferrer"
+            title={node.url}
+            aria-label={`Open link: ${node.url}`}
+            onClick={event => event.stopPropagation()}
+            style={{ color: 'inherit', textDecoration: 'none', fontSize: '13px' }}
+          >
+            🔗
+          </a>
+        )}
       </div>
 
-      <Handle
-        type="source"
-        position={Position.Bottom}
-        style={{ background: colors.border }}
-      />
+      <Handle type="source" position={Position.Bottom} style={{ background: colors.border }} />
     </div>
   );
 }

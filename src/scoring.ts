@@ -106,6 +106,25 @@ function depthsOf(nodes: TreeNode[]): Map<string, number> {
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 
+export interface ScoreRow {
+  label: string;
+  points: number;
+  /** Maximum for the row, or null for the penalty row. */
+  max: number | null;
+}
+
+/** The breakdown as table rows, shared by the end screen and the export. */
+export function scoreRows(score: ScoreBreakdown): ScoreRow[] {
+  return [
+    { label: 'Coverage', points: score.coverage, max: COVERAGE_MAX },
+    { label: 'Depth', points: score.depth, max: DEPTH_PER_LEVEL * DEPTH_MAX_LEVELS },
+    { label: 'Kind balance', points: score.balance, max: BALANCE_PER_KIND * 3 },
+    { label: 'Shared authorship', points: score.authorship, max: AUTHORSHIP_FULL },
+    { label: 'Content', points: score.content, max: CONTENT_MAX },
+    { label: 'Open gaps', points: -score.gapPenalty, max: null },
+  ];
+}
+
 export function computeScore(nodes: TreeNode[]): ScoreBreakdown {
   const children = childrenOf(nodes);
 

@@ -1,9 +1,11 @@
 import { lazy, Suspense } from 'react';
 import { ReactFlowProvider } from 'reactflow';
+import EndScreen from './end-screen';
 import GameCanvas from './game-canvas';
 import GameControls from './game-controls';
-import { useWebMCP } from './use-webmcp';
+import SetupScreen from './setup-screen';
 import { useGameStore } from './store';
+import { useWebMCP } from './use-webmcp';
 import './app.css';
 
 const VoiceAgentIsland = lazy(() => import('./voice-agent-island'));
@@ -11,6 +13,7 @@ const VoiceAgentIsland = lazy(() => import('./voice-agent-island'));
 export default function App() {
   const { hasWebMCP } = useWebMCP();
   const isVoiceConnected = useGameStore(state => state.isVoiceConnected);
+  const gamePhase = useGameStore(state => state.gamePhase);
 
   const agentStatus = hasWebMCP
     ? 'WebMCP active'
@@ -24,7 +27,7 @@ export default function App() {
         style={{
           background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
           color: 'white',
-          padding: '16px 24px',
+          padding: '12px 24px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -33,9 +36,9 @@ export default function App() {
         }}
       >
         <div>
-          <h1 style={{ margin: 0, fontSize: '24px', fontWeight: 'bold' }}>CanvasQuest</h1>
-          <p style={{ margin: '4px 0 0 0', fontSize: '13px', opacity: 0.9 }}>
-            Collaborative Learning Game with Voice Agent
+          <h1 style={{ margin: 0, fontSize: '22px', fontWeight: 'bold' }}>CanvasQuest</h1>
+          <p style={{ margin: '2px 0 0 0', fontSize: '13px', opacity: 0.9 }}>
+            Grow a learning tree with an AI agent
           </p>
         </div>
         <div
@@ -56,16 +59,24 @@ export default function App() {
         </div>
       </header>
 
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
-          <ReactFlowProvider>
-            <GameCanvas />
-          </ReactFlowProvider>
-          <Suspense fallback={null}>
-            <VoiceAgentIsland />
-          </Suspense>
-        </div>
-        <GameControls />
+      <div style={{ flex: 1, display: 'flex', overflow: 'hidden', position: 'relative' }}>
+        {gamePhase === 'setup' ? (
+          <SetupScreen />
+        ) : (
+          <>
+            <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+              <ReactFlowProvider>
+                <GameCanvas />
+              </ReactFlowProvider>
+            </div>
+            {gamePhase === 'ended' ? <EndScreen /> : <GameControls />}
+          </>
+        )}
+
+        {/* Mounted in every phase so a live voice call survives a new game. */}
+        <Suspense fallback={null}>
+          <VoiceAgentIsland />
+        </Suspense>
       </div>
     </div>
   );

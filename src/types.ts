@@ -55,6 +55,17 @@ export interface GameState {
   history: GameAction[];
 }
 
+/** What survives a reload or a share link: the game minus transient UI state. */
+export interface SavedGame {
+  question: string;
+  nodes: TreeNode[];
+  humanMoves: number;
+  agentMoves: number;
+  currentPlayer: PlayerType;
+  gamePhase: GamePhase;
+  history: GameAction[];
+}
+
 export interface WebMCPTool {
   name: string;
   description: string;

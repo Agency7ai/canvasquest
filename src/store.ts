@@ -7,6 +7,7 @@ import type {
   NodeContent,
   NodeKind,
   PlayerType,
+  SavedGame,
   TreeNode,
 } from './types';
 
@@ -20,12 +21,33 @@ export const MOVES_PER_PLAYER = 6;
 /** Turns yielded in a row (pass or skip, no move between) that end the game. */
 export const PASSES_TO_END = 2;
 
+/** Idle time on the human's turn, with a voice agent live, before the turn passes. */
+export const IDLE_PASS_MS = 15_000;
+
+/** Delay before an absent agent's turn is skipped automatically. */
+export const AUTO_SKIP_MS = 1_000;
+
+/** Debounce for writing the game to localStorage. */
+export const PERSIST_DEBOUNCE_MS = 300;
+
 /** Kinds a child node may have. The root is created only by plant. */
 export const BRANCH_KINDS: readonly NodeKind[] = ['concept', 'resource', 'skill'];
 
 // Short ids so a voice agent can say and hear them reliably.
 let nodeCounter = 0;
 const nextNodeId = () => `n${++nodeCounter}`;
+
+/** Highest n<number> id in a node list, so restored games keep ids unique. */
+function highestNodeNumber(nodes: TreeNode[]): number {
+  return nodes.reduce((max, node) => {
+    const match = /^n(\d+)$/.exec(node.id);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+}
+
+/** The selection survives a change only if the node still exists. */
+const keepSelection = (selectedNodeId: string | null, nodes: TreeNode[]) =>
+  selectedNodeId !== null && nodes.some(n => n.id === selectedNodeId) ? selectedNodeId : null;
 
 export interface MoveOutcome {
   success: boolean;
@@ -126,6 +148,12 @@ export function describeAction(action: GameAction): string {
 interface GameStore extends GameState {
   isVoiceConnected: boolean;
   setVoiceConnected: (connected: boolean) => void;
+  /** The node the human clicked, shared by the canvas and the controls. */
+  selectedNodeId: string | null;
+  selectNode: (nodeId: string | null) => void;
+  /** True when the board came from a share link and must not be autosaved. */
+  isSharedView: boolean;
+  loadGame: (saved: SavedGame, options?: { shared?: boolean }) => void;
   startGame: (question: string) => MoveOutcome;
   resetGame: () => void;
   plant: (label: string, player: PlayerType, content?: NodeContent) => MoveOutcome;
@@ -212,6 +240,7 @@ export const useGameStore = create<GameStore>((set, get) => {
       history: [...state.history, action],
       currentPlayer: next ?? state.currentPlayer,
       gamePhase: next ? 'playing' : 'ended',
+      selectedNodeId: keepSelection(state.selectedNodeId, nodes),
     });
   };
 
@@ -235,20 +264,49 @@ export const useGameStore = create<GameStore>((set, get) => {
   return {
     ...initialState,
     isVoiceConnected: false,
+    selectedNodeId: null,
+    isSharedView: false,
 
     setVoiceConnected: connected => set({ isVoiceConnected: connected }),
+
+    selectNode: nodeId => set({ selectedNodeId: nodeId }),
+
+    loadGame: (saved, options = {}) => {
+      nodeCounter = Math.max(
+        highestNodeNumber(saved.nodes),
+        ...saved.history.map(action => highestNodeNumber(action.before)),
+      );
+      set({
+        question: saved.question,
+        nodes: saved.nodes,
+        humanMoves: saved.humanMoves,
+        agentMoves: saved.agentMoves,
+        currentPlayer: saved.currentPlayer,
+        gamePhase: saved.gamePhase,
+        history: saved.history,
+        consecutivePasses: 0,
+        selectedNodeId: null,
+        isSharedView: options.shared ?? false,
+      });
+    },
 
     startGame: question => {
       const trimmed = question.trim();
       if (!trimmed) return fail('Enter a question to start the game');
       nodeCounter = 0;
-      set({ ...initialState, question: trimmed, gamePhase: 'playing' });
+      set({
+        ...initialState,
+        question: trimmed,
+        gamePhase: 'playing',
+        selectedNodeId: null,
+        isSharedView: false,
+      });
       return ok(`Game started: ${trimmed}`);
     },
 
     resetGame: () => {
       nodeCounter = 0;
-      set({ ...initialState });
+      set({ ...initialState, selectedNodeId: null, isSharedView: false });
     },
 
     plant: (rawLabel, player, content = {}) => {
@@ -408,22 +466,28 @@ export const useGameStore = create<GameStore>((set, get) => {
     // action, prune included, comes back exactly as it was.
     undoLastMove: () => {
       const state = get();
-      const why = blocked(state);
-      if (why) return fail(why);
+      if (state.gamePhase === 'setup') return fail(blocked(state) ?? 'The game has not started');
+      if (state.isSharedView) return fail('A board opened from a share link is read-only');
 
       const last = state.history[state.history.length - 1];
       if (!last) return fail('No moves to undo');
       if (last.player !== 'agent') return fail('Only the most recent agent action can be undone');
 
+      // Undo is also allowed once the game is over: the agent's final move may
+      // have been the one that ended it, and the human gets to contest it.
       const agentMoves = state.agentMoves + (last.costsMove ? 1 : 0);
+      const nextPlayer = resolveTurn('human', state.humanMoves, agentMoves);
+      const reopened = state.gamePhase === 'ended' && nextPlayer !== null;
       set({
         nodes: last.before,
         history: state.history.slice(0, -1),
         agentMoves,
         consecutivePasses: 0,
-        currentPlayer: resolveTurn('human', state.humanMoves, agentMoves) ?? 'human',
+        currentPlayer: nextPlayer ?? 'human',
+        gamePhase: reopened ? 'playing' : state.gamePhase,
+        selectedNodeId: keepSelection(state.selectedNodeId, last.before),
       });
-      return ok(`Undid: agent ${describeAction(last)}`);
+      return ok(`Undid: agent ${describeAction(last)}${reopened ? ' — the game is back on' : ''}`);
     },
   };
 });

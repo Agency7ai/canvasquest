@@ -1,252 +1,201 @@
 # CanvasQuest
 
-A collaborative learning game where humans and voice agents work together to build a knowledge tree. Built for the WebMCP Challenge 2026.
+**A cooperative learning-tree game where a human and an AI agent build a study plan together, one move at a time.**
 
-**Developer:** [wispyco](https://github.com/wispyco)
+Built for the [ElevenLabs WebMCP Challenge](https://elevenlabs.io/), CanvasQuest turns the question "How should I learn X?" into a turn-based board game. The human plays through buttons; the agent plays through the same rules over WebMCP or the ElevenLabs voice client tools. One rules engine, three ways in.
 
-**Repo:** [Agency7ai/canvasquest](https://github.com/Agency7ai/canvasquest)
+- Developer: Anders Kitson
+- Repository: `Agency7ai/canvasquest`
 
 ## What is CanvasQuest?
 
-CanvasQuest is a turn-based game on a shared canvas where a human player and an
-AI voice agent collaborate to build a learning tree. The human clicks and types;
-the agent may only change the board by calling registered tools. Voice is the
-agent's controller.
+You start with a question. Together, you and the agent grow a **learning tree**: concepts to understand, resources to read, skills to practise. Each player has a small budget of moves, so every branch has to earn its place. Unresolved branches are flagged as **gaps**, and the tree is scored on breadth, depth, variety, shared authorship and substance.
 
-Two agent surfaces are supported, and both go through the same tools:
+The human plays on a React Flow canvas. The agent plays through tools:
 
-- **WebMCP** — an in-browser agent such as ChatGPT's built-in browser calls the
-  tools registered on `document.modelContext`.
-- **ElevenLabs voice** — an on-canvas voice panel connects to a public ElevenLabs
-  agent that invokes the same moves as client tools.
+- **WebMCP** (`document.modelContext`): the page registers its tools with the browser, so any WebMCP-capable agent (Chrome with the WebMCP flag, ChatGPT in a WebMCP browser, and so on) can play.
+- **ElevenLabs voice**: the same tools are exposed as ElevenLabs *client tools*, so a voice agent can play by talking to you.
 
-## Game Rules
+Both paths call the same `applyMove()` function, which drives the same Zustand store the buttons use. There is no second implementation of any rule.
 
-- **Goal**: Grow one learning tree together and finish with the highest score out of 100
-- **Moves**: each player has 6 moves of their own; passing and annotating are free
-- **Turns**: human and agent alternate; a player with no moves left is skipped
-- **End**: the game ends when both budgets are spent, or when both players pass in a row
-- **Gaps**: a node can be flagged as a gap; branching a resource or skill directly under it closes the gap. A concept with no resource or skill anywhere beneath it is an implicit gap
-- **Score**: coverage (6 per concept with a resource or skill beneath it, max 30), depth (5 per level, max 15), kind balance (5 per kind present, max 15), shared authorship (20 if both players created 2+ nodes, 10 if both created 1+), content (1 per node with a note or url, max 10), minus 5 per open gap
+## How a game goes
 
-### Node Types
+1. **Setup.** Type the question you want to plan for, or pick one of the presets. Nothing else is on the board yet.
+2. **Play.** The human plants the root, then the players alternate. The human clicks a node to select it and uses the side panel to branch, prune, mark a gap, add a note or link, or pass. The agent calls `get_board` and then one of the move tools. The panel shows both budgets, whose turn it is, the live score, the open gaps and the last few moves.
+3. **End.** The game ends when both budgets are spent, or when both players yield in a row. The end screen shows the score breakdown and the open gaps, and offers **Export markdown** (downloads `<question-slug>.md`), **Copy markdown**, **Copy share link** and **New game**. If the agent's final move ended the game, the human can still undo it from the end screen and keep playing.
+4. **Coming back.** The game autosaves to `localStorage` and restores itself on reload, mid-game or finished. **Reset** wipes the save. A share link encodes the whole board in the URL hash; opening one shows a read-only board with the score and export options, and never overwrites your own saved game.
 
-- 🌱 **Root**: The main learning question (planted first)
-- 💡 **Concept**: Ideas, topics, or theories
-- 📚 **Resource**: Books, courses, or learning materials
-- ⚡ **Skill**: Abilities or competencies to develop
+## Game rules
 
-A gap (❓) is a flag on top of any of these kinds, not a kind of its own.
+- **Budgets.** Each player has 6 moves. The budgets are separate: the human running out never costs the agent a move, and vice versa.
+- **Costly moves.** `plant`, `branch`, `prune` and `mark_gap` each cost one move and must be made on your own turn.
+- **Free moves.** `annotate` (add or change a note or link), `pass` and `get_board` are free and never change whose turn it is. Anyone can annotate any node at any time while the game is running.
+- **Turns.** Turns alternate after every costly move. A player with no moves left is skipped, so the other player keeps the turn until their own budget is spent.
+- **Stalled agent.** The human can skip the agent's turn at any time. With no agent connected (no WebMCP tools registered and no voice session), the agent's turn is skipped automatically after one second. With a voice agent connected, fifteen seconds without a human edit passes the human's turn automatically, with a visible countdown.
+- **Ending.** The game ends when both budgets reach zero, or when two yields happen in a row. A skip counts as the agent yielding, so a human who passes right after skipping the agent ends the game.
+- **Planting.** Only an empty board can be planted, and only once. The root can never be pruned or marked as a gap.
+- **Pruning.** Pruning removes a node and everything beneath it.
+- **Gaps.** A gap is a flag on a concept, not a node kind. Marking a gap says "this branch still needs something concrete". It closes automatically the moment a resource or skill is branched directly under it. You cannot mark the root, a node that is already a gap, or a node that already has a resource or skill child. Concepts with no resource or skill anywhere beneath them count as **implicit gaps** for scoring even if nobody marked them.
+- **Undo.** The human can take back the agent's most recent action, and only that. Undo refunds the agent's move, restores pruned subtrees in full, and hands the turn back to the human. It is also available on the end screen when the agent's move ended the game, which reopens the game. Shared boards are read-only and cannot be undone.
 
-### Available Actions
+### Scoring
 
-1. **Plant** - Create the root node (first move only)
-2. **Branch** - Add a child node to any existing node; a resource or skill under a gap closes it
-3. **Prune** - Remove a node and all its descendants
-4. **Mark Gap** - Flag a node as a knowledge gap, with an optional reason
-5. **Annotate** - Add a note or url to a node (free)
-6. **Pass** - Yield the turn (free)
-7. **Undo** - Human can undo the last agent action
+| Component | Points | Max |
+| --- | --- | --- |
+| Coverage | 6 per concept that has a resource or skill anywhere beneath it | 30 |
+| Depth | 5 per level below the root, up to three levels | 15 |
+| Kind balance | 5 for each of concept, resource and skill present on the board | 15 |
+| Shared authorship | 20 when both players created at least two nodes, 10 when both created at least one | 20 |
+| Content | 1 per node with a note or a link | 10 |
+| Open gaps | −5 per open gap, explicit or implicit (each node counted once) | — |
+
+The total is clamped to the 0–100 range. The five positive components add up to 90, so the last ten points are headroom rather than something a board can earn today.
+
+### Why these rules
+
+Separate budgets keep one player from starving the other, so the tree is always the product of two authors. Free notes, links and passes let the conversation continue without burning turns, which matters when one player is a voice agent that likes to explain itself. Treating a gap as a flag rather than a node kind keeps the tree meaningful: a gap is an unfinished concept, and it closes itself when someone finishes it, so there is no bookkeeping move to spend. Implicit gaps push both players toward actionable plans, because a concept that never ends in something to read or practise is a promise nobody kept. Limiting undo to the agent's last move keeps the human in charge of the board without letting anyone rewrite history. And the score rewards exactly what a good study plan needs: breadth, depth, variety of node kinds, real collaboration and substance, while penalising open questions.
+
+### Node types
+
+| Kind | Meaning |
+| --- | --- |
+| `root` | The question. Exactly one per board, created by `plant`. |
+| `concept` | Something to understand. Can be marked as a gap. |
+| `resource` | Something to read, watch or reference. Closes a gap on its parent. |
+| `skill` | Something to practise. Closes a gap on its parent. |
+
+### Available actions
+
+| Action | Cost | Who | What it does |
+| --- | --- | --- | --- |
+| Plant | 1 move | Either, on turn | Creates the root on an empty board |
+| Branch | 1 move | Either, on turn | Adds a concept, resource or skill under a node |
+| Prune | 1 move | Either, on turn | Removes a node and its subtree |
+| Mark gap | 1 move | Either, on turn | Flags a concept as needing more work |
+| Annotate | Free | Either, any time | Adds or clears a note and a link on a node |
+| Pass | Free | Either, on turn | Yields the turn; two in a row end the game |
+| Skip agent | Free | Human | Yields on the agent's behalf when it stalls |
+| Undo | Free | Human | Reverts the agent's most recent action |
 
 ## Agent tools
 
-CanvasQuest exposes seven tools. Four cost a move; `get_board`, `annotate` and
-`pass` are free.
+Every agent-callable move exists in three places that must stay in sync: `TOOL_DEFINITIONS` in `src/moves.ts` (WebMCP), the `useConversationClientTool` hooks in `src/voice-agent.tsx` (ElevenLabs runtime) and `elevenlabs-tools.json` (ElevenLabs dashboard import). `src/tools-sync.test.ts` fails if they drift.
 
-| Tool | Arguments | Cost | Effect |
+| Tool | Cost | Parameters | Description |
 | --- | --- | --- | --- |
-| `get_board` | – | free | Returns the question, every node, both budgets, whose turn, score and open gaps |
-| `plant` | `label`, `note?` | 1 move | Creates the root node (first move only) |
-| `branch` | `parentId`, `label`, `kind`, `note?`, `url?` | 1 move | Adds a child node; closes the parent's gap if it is a resource or skill |
-| `prune` | `nodeId` | 1 move | Removes a node and its descendants |
-| `mark_gap` | `nodeId`, `reason?` | 1 move | Flags a node as an open gap |
-| `annotate` | `nodeId`, `note?`, `url?` | free | Sets or clears a node's note and url |
-| `pass` | – | free | Ends the turn without moving |
+| `get_board` | Free | none | Returns the question, phase, turn, budgets, score, open and implicit gaps and every node |
+| `plant` | 1 move | `label`, `note?`, `url?` | Creates the root on an empty board |
+| `branch` | 1 move | `parentId`, `label`, `kind`, `note?`, `url?` | Adds a `concept`, `resource` or `skill` under a node |
+| `prune` | 1 move | `nodeId` | Removes a node and its subtree |
+| `mark_gap` | 1 move | `nodeId`, `reason?` | Flags a concept as a gap |
+| `annotate` | Free | `nodeId`, `note?`, `url?` | Sets or clears a note or link |
+| `pass` | Free | none | Yields the turn |
 
-`parentId` and `nodeId` accept either a node id (`n1`, `n2`) or a node's label,
-so a voice agent can say "branch from First Principles" instead of spelling out
-an id.
+Node references (`parentId`, `nodeId`) accept an exact id such as `n3`, an exact label, or a unique partial label, case-insensitively. Anything ambiguous is rejected with a hint to call `get_board`. Every tool returns `{ success, message, nodeId?, board }`, so the agent always sees the board after its move, including the reason a move was refused.
 
-Both agent surfaces are driven by the same table of definitions in `src/moves.ts`
-and execute through the same `applyMove` dispatcher:
+## Voice agent setup (ElevenLabs)
 
-- **WebMCP** — registered on `document.modelContext` when the browser supports it.
-- **ElevenLabs voice** — the same moves registered as client tools on the canvas panel.
+1. Create an agent in the [ElevenLabs dashboard](https://elevenlabs.io/app/conversational-ai).
+2. Import the client tools from `elevenlabs-tools.json` (one tool per entry, all of type `client`).
+3. Paste the system prompt below.
+4. Copy the agent id into `.env` as `VITE_ELEVENLABS_AGENT_ID` (see `.env.example`) and rebuild. The voice island in the bottom-left corner stays collapsed until an agent id is configured.
 
-Neither surface can touch the DOM directly or skip a rule, because both call the
-identical store actions the human's buttons call.
+### System prompt
 
-## Voice agent (ElevenLabs)
+```text
+You are the agent player in CanvasQuest, a cooperative game in which you and a human build a learning tree for a question the human chose.
 
-A voice panel sits on the bottom-left of the canvas. It shows connection status,
-whether the agent is speaking or listening, and a log of the moves the agent has
-made.
-
-### Configure an agent
-
-1. Create an agent in the [ElevenLabs dashboard](https://elevenlabs.io/app/agents).
-2. Leave it **public** (no authentication). A public agent connects from the
-   browser with its id alone, so this app needs no API key and no backend.
-3. Add the seven tools above as **client tools** on the agent. Ready-to-paste
-   definitions are in [`elevenlabs-tools.json`](elevenlabs-tools.json): in the
-   dashboard choose **Tools → Add tool → Edit as JSON** and paste one object
-   from the `tools` array for each. Names and parameter ids must match exactly,
-   since the browser looks tools up by name and reads arguments by id.
-4. Give the agent a system prompt along these lines:
-
-   > You are playing CanvasQuest, a turn-based game where you and a human grow
-   > one learning tree that answers the question on the board. Call `get_board`
-   > before each move to see the real node ids, both move budgets, whose turn it
-   > is and the open gaps. You and the human alternate turns; on your turn make
-   > exactly one costly move (`plant`, `branch`, `prune` or `mark_gap`), then stop
-   > and wait. Each player has 6 moves; `pass` and `annotate` are free. The score
-   > (0 to 100) rewards concepts that have a resource or skill beneath them, depth
-   > up to three levels, using all three kinds, both players contributing, and
-   > notes or urls, and subtracts 5 per open gap (a node marked as a gap, or a
-   > concept with no resource or skill under it). Branch a resource or skill
-   > directly under a gap to close it. Keep labels to two to five words and say
-   > briefly what you did after each move.
-
-5. Copy the agent id into `.env`:
-
-   ```bash
-   cp .env.example .env
-   # VITE_ELEVENLABS_AGENT_ID=agent_xxxxxxxxxxxxxxxxxxxxxxxxx
-   ```
-
-6. Restart `npm run dev`, then click **Start talking** and allow microphone access.
-
-Without an agent id the panel stays visible and explains the setup; the game
-remains fully playable by clicking.
+Rules you must follow:
+- Always call get_board before your first move and after any surprise. If gamePhase is "setup", ask the human to choose a question first.
+- You have 6 costly moves for the whole game: plant, branch, prune and mark_gap each cost one. annotate and pass are free. Only move when currentPlayer is "agent".
+- Prefer branch. Add concepts to understand, resources to read and skills to practise. Put a resource or skill under every concept you create so it does not stay an open gap.
+- Use mark_gap when a concept needs something you cannot supply yet, and say why in the reason.
+- Use prune only for things that are clearly wrong or off-topic, and say so out loud first.
+- Use annotate freely to add short notes and links that make the tree useful.
+- Reference nodes by their id (for example n3) or their exact label.
+- Keep your spoken turns short: say what you are adding and why, in one or two sentences, then make the move.
+- If a tool result says success is false, read the message, adjust, and try again or pass.
+- When you are out of moves or have nothing worth adding, call pass.
+```
 
 ## WebMCP integration
 
-Tools are registered through `document.modelContext.registerTool` behind a
-feature detect, so nothing breaks in browsers without WebMCP:
+On load, `src/use-webmcp.ts` looks for `document.modelContext` and registers every entry of `TOOL_DEFINITIONS` with `registerTool`. Each tool's `execute` calls `applyMove()` and returns the result as JSON text. The console prints:
 
-```ts
-if (typeof document.modelContext?.registerTool === 'function') {
-  // register the seven tools
-}
+```text
+[WebMCP] Registered 7 tools
 ```
 
-Registration is guarded at module scope and treats an `AbortError` from React
-Strict Mode's double mount as expected teardown rather than a failure. Each
-`execute` returns a structured JSON result containing the outcome and the full
-board, so the agent can see what changed without reading the DOM.
+When it is absent and no voice session is connected, the header shows the agent as not connected and the agent's turn is skipped automatically, so the human can still play solo.
 
-## Testing with ChatGPT (Primary Path)
+### Testing with ChatGPT
 
-1. Start the dev server: `npm run dev`
-2. Open ChatGPT desktop app (ChatGPT Work or Codex)
-3. Navigate to the app URL in ChatGPT's built-in browser
-4. The app will detect WebMCP and register tools automatically
-5. Ask ChatGPT to play, for example "Read the board, then plant a root for the
-   question" or "Branch from First Principles with a concept called Model Context"
-6. ChatGPT calls the registered tools; each move appears on the canvas immediately
+Open the built app in a WebMCP-capable browser, connect ChatGPT (or any WebMCP agent) to the tab, and ask it to play. It should call `get_board`, then take turns with you using the tools above.
 
-## Testing with Chrome
+### Testing with Chrome
 
-1. Enable WebMCP in Chrome:
-   - Open `chrome://flags/#enable-webmcp-testing`
-   - Enable the flag
-   - Restart Chrome
+1. Enable the WebMCP flag in Chrome (`chrome://flags`, search for "WebMCP").
+2. Load the app and check the console for `[WebMCP] Registered 7 tools`.
+3. Use the browser's agent surface, or a stub such as `document.modelContext = { registerTool() {}, unregisterTool() {} }` before load to exercise the "agent connected" path by hand.
 
-2. Install a WebMCP inspector extension (if available) or use the browser console to verify tools are registered
-
-3. Run the dev server and open the app:
-   ```bash
-   npm run dev
-   ```
-
-4. Check the console for: `[WebMCP] Registered 7 tools`
-
-## Local Development
-
-### Prerequisites
-
-- Node.js 18+ and npm
-
-### Installation
+## Local development
 
 ```bash
-npm install
-```
-
-### Run Development Server
-
-```bash
+npm ci
 npm run dev
 ```
 
-The app will be available at `http://localhost:5173` (or the port shown in terminal).
+| Script | What it does |
+| --- | --- |
+| `npm run dev` | Vite dev server with hot reload |
+| `npm run build` | `tsc -b` type check, then a static Vite build into `dist/` |
+| `npm test` | Vitest unit tests for the store, scoring, tools and tool-surface sync |
+| `npm run lint` | oxlint |
+| `npm run preview` | Serves the production build |
 
-### Build for Production
-
-```bash
-npm run build
-```
-
-Built files will be in the `dist/` directory.
-
-### Preview Production Build
-
-```bash
-npm run preview
-```
+The build is fully static. There is no backend and no API key; the only optional configuration is the ElevenLabs agent id in `.env`. `package-lock.json` is committed, so `npm ci` gives a reproducible install.
 
 ## Architecture
 
-### Tech Stack
+- **Vite + React 19 + TypeScript** (strict), **React Flow 11** for the canvas, **Zustand 5** for state, **d3-hierarchy** for the tree layout, **@elevenlabs/react** for voice, **Vitest** for tests.
 
-- **Vite** - Build tool and dev server
-- **React 19** - UI framework
-- **TypeScript** - Type safety
-- **React Flow** - Canvas and node visualization
-- **Zustand** - State management
+### Key files
 
-### Key Components
-
-- `store.ts` — game state and rules (Zustand store)
-- `moves.ts` — tool definitions and the shared `applyMove` dispatcher
-- `use-webmcp.ts` — WebMCP registration hook
-- `voice-agent.tsx` — canvas voice panel and ElevenLabs client tools
-- `voice-agent-island.tsx` — lazy-loaded provider wrapper
-- `game-canvas.tsx` — React Flow canvas
-- `game-controls.tsx` — human player controls
-- `tree-node.tsx` — custom React Flow node
+| File | Role |
+| --- | --- |
+| `src/store.ts` | The rules engine. Budgets, turns, gaps, undo, history, game phase. Every mutation of `nodes` goes through here. |
+| `src/moves.ts` | `applyMove()`, `readBoard()`, node reference resolution and `TOOL_DEFINITIONS`. The only entry point for agents. |
+| `src/scoring.ts` | `computeScore()`, `computeImplicitGaps()` and the breakdown rows shown in the UI. |
+| `src/layout.ts` | Tidy tree layout with d3-hierarchy; positions are derived, never stored. |
+| `src/persistence.ts` | Debounced `localStorage` autosave, restore on load, share-link hash encoding. |
+| `src/export-markdown.ts` | Turns the board into a markdown study plan for download or clipboard. |
+| `src/setup-screen.tsx` | The question prompt and presets shown before the game starts. |
+| `src/game-canvas.tsx` | React Flow canvas, store-owned selection, auto-fit. |
+| `src/tree-node.tsx` | The custom React Flow node: kind colours, gap badge, note and link markers. |
+| `src/game-controls.tsx` | The human's controls: budgets, turn, score, gaps, history, move buttons, auto-skip and idle-pass timers. |
+| `src/end-screen.tsx` | Score breakdown, open gaps, export, share link, undo and new game. |
+| `src/use-webmcp.ts` | Registers `TOOL_DEFINITIONS` with WebMCP. |
+| `src/voice-agent.tsx` | ElevenLabs conversation panel and the client tool hooks. |
+| `src/voice-agent-island.tsx` | Lazy-loads the voice panel so the ElevenLabs client is only fetched when needed. |
+| `elevenlabs-tools.json` | Client tool definitions for the ElevenLabs dashboard. |
 
 ### Tools vs UI
 
-There is exactly one implementation of each move, in the Zustand store. Three
-entry points reach it:
-
+```text
+Human buttons ──► store actions ─┐
+                                 ├──► Zustand store (rules) ──► React Flow canvas
+WebMCP tools ──► applyMove() ────┤
+ElevenLabs client tools ─────────┘
 ```
-human buttons  ──┐
-WebMCP tools   ──┼──→ applyMove() ──→ store action ──→ React re-render
-voice tools    ──┘
-```
-
-`game-controls.tsx` calls the store directly as the human player; `moves.ts`
-calls the same actions as the agent player. Adding a move means adding it once
-in `moves.ts`, and both agent surfaces pick it up.
 
 ### Bundle
 
-The ElevenLabs WebRTC SDK is code-split into its own chunk via `React.lazy`, so
-the board is interactive before the voice stack finishes downloading.
+`npm run build` emits a static `dist/` folder. The ElevenLabs client is lazy-loaded so the voice code only downloads when the island is opened.
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Copyright (c) 2026 [wispyco](https://github.com/wispyco) / Agency7ai.
+MIT, see `LICENSE`.
 
-## Challenge Submission
+## Challenge submission
 
-Built for the 3-day WebMCP Challenge (deadline: Thu Sep 3, 2026 1:00pm PDT)
-
-- Original game concept (not StudyTree, RentVoy, or Conundrum Quest)
-- Collaborative canvas game with turn-based play
-- Voice agent interacts ONLY through WebMCP tools
-- Human can undo agent moves
-- No API keys or backend required
-- Static deployable build
+CanvasQuest is an entry for the ElevenLabs WebMCP Challenge. It demonstrates a single set of game rules exposed to humans through a UI, to browser agents through WebMCP, and to voice agents through ElevenLabs client tools, with no backend and no API keys in the client.

@@ -1,4 +1,5 @@
 import { memo } from 'react';
+import type { CSSProperties } from 'react';
 import { Handle, Position, type NodeProps } from 'reactflow';
 import { NODE_WIDTH } from './layout';
 import type { TreeNode, NodeKind } from './types';
@@ -9,44 +10,61 @@ export interface TreeNodeData {
   implicitGap?: boolean;
 }
 
-const kindColors: Record<NodeKind, { bg: string; border: string; text: string }> = {
-  root: { bg: '#6366f1', border: '#4f46e5', text: '#ffffff' },
-  concept: { bg: '#10b981', border: '#059669', text: '#ffffff' },
-  resource: { bg: '#f59e0b', border: '#d97706', text: '#ffffff' },
-  skill: { bg: '#8b5cf6', border: '#7c3aed', text: '#ffffff' },
+// The board's palette, matching the CSS variables in app.css. Inline because
+// React Flow renders the cards inside its own transformed layer.
+const PAPER = '#f3ecd9';
+const PAPER_DEEP = '#e1d6b8';
+const INK = '#2b2a20';
+const INK_SOFT = '#5d5b48';
+const LINE = '#7a7458';
+const GAP_COLOR = '#a5442c';
+const IMPLICIT_GAP_COLOR = '#c48d1a';
+const SELECTION_COLOR = '#fff1bd';
+const MONO = "ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace";
+const SERIF = "'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, serif";
+
+/** The stripe down a card's left edge, one colour per kind. */
+const kindAccent: Record<NodeKind, string> = {
+  root: '#3b6236',
+  concept: '#4d7b46',
+  resource: '#c48d1a',
+  skill: '#7fa06a',
 };
 
-const kindLabels: Record<NodeKind, string> = {
-  root: '🌱',
-  concept: '💡',
-  resource: '📚',
-  skill: '⚡',
-};
-
-const GAP_COLOR = '#ef4444';
-const IMPLICIT_GAP_COLOR = '#f59e0b';
-const SELECTION_COLOR = '#0f172a';
 const NOTE_PREVIEW_CHARS = 40;
 
 const previewOf = (note: string) =>
   note.length > NOTE_PREVIEW_CHARS ? `${note.slice(0, NOTE_PREVIEW_CHARS).trimEnd()}…` : note;
 
+const tagStyle = (color: string): CSSProperties => ({
+  padding: '0 5px',
+  fontSize: '9px',
+  fontWeight: 700,
+  lineHeight: '14px',
+  textTransform: 'uppercase',
+  letterSpacing: '0.12em',
+  color,
+  border: `1px solid ${color}`,
+  borderRadius: '2px',
+});
+
 function TreeNodeComponent({ data, selected }: NodeProps<TreeNodeData>) {
   const { node, implicitGap = false } = data;
-  const colors = kindColors[node.kind];
+  const accent = kindAccent[node.kind];
 
-  // A gap keeps the colour of its real kind; the red border and badge sit on top.
-  // An implicit gap gets an amber dashed border and no badge.
+  // A gap keeps the stripe of its real kind; the rust dashed border and the
+  // tag sit on top. An implicit gap gets an amber dashed border and no tag.
   const border = node.isGap
-    ? `3px dashed ${GAP_COLOR}`
+    ? `2px dashed ${GAP_COLOR}`
     : implicitGap
-      ? `3px dashed ${IMPLICIT_GAP_COLOR}`
-      : `2px solid ${colors.border}`;
+      ? `2px dashed ${IMPLICIT_GAP_COLOR}`
+      : `1px solid ${LINE}`;
   const tooltip = node.isGap
     ? `Gap${node.gapReason ? `: ${node.gapReason}` : ''}`
     : implicitGap
       ? 'Implicit gap: add a resource or skill beneath this concept'
       : undefined;
+  const handleStyle: CSSProperties = { background: accent, border: `1px solid ${PAPER}` };
 
   return (
     <div
@@ -55,49 +73,32 @@ function TreeNodeComponent({ data, selected }: NodeProps<TreeNodeData>) {
         position: 'relative',
         boxSizing: 'border-box',
         width: `${NODE_WIDTH}px`,
-        padding: '12px 14px',
-        borderRadius: '8px',
+        padding: '10px 12px 10px 16px',
+        borderRadius: '4px',
         border,
         outline: selected ? `3px solid ${SELECTION_COLOR}` : 'none',
         outlineOffset: '3px',
-        background: colors.bg,
-        color: colors.text,
-        fontSize: '14px',
-        fontWeight: 500,
-        boxShadow: selected ? '0 8px 16px rgba(0, 0, 0, 0.2)' : '0 4px 6px rgba(0, 0, 0, 0.1)',
+        background: PAPER,
+        color: INK,
+        fontFamily: MONO,
+        fontSize: '13px',
+        boxShadow: `inset 4px 0 0 ${accent}, ${selected ? '0 8px 18px rgba(0, 0, 0, 0.45)' : '0 4px 10px rgba(0, 0, 0, 0.3)'}`,
         cursor: 'pointer',
       }}
     >
-      {node.parentId && (
-        <Handle type="target" position={Position.Top} style={{ background: colors.border }} />
-      )}
+      {node.parentId && <Handle type="target" position={Position.Top} style={handleStyle} />}
 
-      {node.isGap && (
-        <span
-          aria-label="Open gap"
-          style={{
-            position: 'absolute',
-            top: '-12px',
-            right: '-12px',
-            width: '26px',
-            height: '26px',
-            borderRadius: '50%',
-            background: GAP_COLOR,
-            color: 'white',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '15px',
-            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.25)',
-          }}
-        >
-          ❓
-        </span>
-      )}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' }}>
+        <span style={tagStyle(accent)}>{node.kind}</span>
+        {node.isGap && (
+          <span aria-label="Open gap" style={tagStyle(GAP_COLOR)}>
+            gap
+          </span>
+        )}
+      </div>
 
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
-        <span style={{ fontSize: '18px', lineHeight: 1.2 }}>{kindLabels[node.kind]}</span>
-        <div style={{ flex: 1, wordBreak: 'break-word', lineHeight: 1.3 }}>{node.label}</div>
+      <div style={{ fontFamily: SERIF, fontSize: '14px', fontWeight: 600, lineHeight: 1.3, wordBreak: 'break-word' }}>
+        {node.label}
       </div>
 
       {node.note && (
@@ -105,9 +106,8 @@ function TreeNodeComponent({ data, selected }: NodeProps<TreeNodeData>) {
           style={{
             marginTop: '4px',
             fontSize: '11px',
-            fontWeight: 400,
             fontStyle: 'italic',
-            opacity: 0.8,
+            color: INK_SOFT,
             wordBreak: 'break-word',
           }}
         >
@@ -117,22 +117,23 @@ function TreeNodeComponent({ data, selected }: NodeProps<TreeNodeData>) {
 
       <div
         style={{
-          marginTop: '6px',
-          fontSize: '11px',
-          opacity: 0.85,
-          fontWeight: 400,
+          marginTop: '7px',
           display: 'flex',
           alignItems: 'center',
           gap: '6px',
+          fontSize: '10.5px',
+          color: INK_SOFT,
         }}
       >
         {/* Agents refer to nodes by id, so the human needs to see it too. */}
         <code
           style={{
-            background: 'rgba(255, 255, 255, 0.22)',
-            borderRadius: '4px',
             padding: '1px 5px',
+            fontFamily: MONO,
             fontWeight: 600,
+            color: INK,
+            background: PAPER_DEEP,
+            borderRadius: '2px',
           }}
         >
           {node.id}
@@ -146,14 +147,21 @@ function TreeNodeComponent({ data, selected }: NodeProps<TreeNodeData>) {
             title={node.url}
             aria-label={`Open link: ${node.url}`}
             onClick={event => event.stopPropagation()}
-            style={{ color: 'inherit', textDecoration: 'none', fontSize: '13px' }}
+            style={{
+              color: '#3b6236',
+              textDecoration: 'none',
+              fontSize: '9.5px',
+              fontWeight: 700,
+              textTransform: 'uppercase',
+              letterSpacing: '0.1em',
+            }}
           >
-            🔗
+            Link ↗
           </a>
         )}
       </div>
 
-      <Handle type="source" position={Position.Bottom} style={{ background: colors.border }} />
+      <Handle type="source" position={Position.Bottom} style={handleStyle} />
     </div>
   );
 }

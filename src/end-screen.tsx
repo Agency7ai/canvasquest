@@ -1,22 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { gameToMarkdown, slugify } from './export-markdown';
-import { asideStyle, footnoteStyle } from './panel';
 import { applyShareHash, buildShareUrl } from './persistence';
 import { computeScore, scoreRows } from './scoring';
 import { useGameStore } from './store';
 import type { SavedGame } from './types';
 
 const NOTICE_MS = 3000;
-
-const buttonStyle = {
-  padding: '10px',
-  border: 'none',
-  borderRadius: '6px',
-  fontWeight: 600,
-  fontSize: '13px',
-  cursor: 'pointer',
-  color: 'white',
-};
 
 export default function EndScreen() {
   const question = useGameStore(state => state.question);
@@ -27,7 +16,7 @@ export default function EndScreen() {
   const isSharedView = useGameStore(state => state.isSharedView);
   const history = useGameStore(state => state.history);
   const grove = useGameStore(state => state.grove);
-  const resetGame = useGameStore(state => state.resetGame);
+  const newTree = useGameStore(state => state.newTree);
   const undoLastMove = useGameStore(state => state.undoLastMove);
   const lastAction = history[history.length - 1];
   const canUndoAgent = !isSharedView && lastAction?.player === 'agent';
@@ -90,119 +79,123 @@ export default function EndScreen() {
     }
   };
 
-  return (
-    <aside style={{ ...asideStyle, padding: '20px', gap: '14px' }}>
-      <div style={{ background: '#0f172a', color: 'white', padding: '16px', borderRadius: '8px', textAlign: 'center' }}>
-        <div style={{ fontSize: '13px', opacity: 0.8, marginBottom: '4px' }}>
-          {isSharedView ? 'Shared board' : 'Game over'}
-        </div>
-        <div style={{ fontSize: '40px', fontWeight: 700, lineHeight: 1 }}>{score.total}</div>
-        <div style={{ fontSize: '13px', opacity: 0.8, marginTop: '4px' }}>out of 100</div>
-      </div>
+  const others = grove.length - 1;
 
-      <div style={{ fontSize: '13px', color: '#475569', lineHeight: 1.4 }}>
+  return (
+    <aside className="aside">
+      <section className="panel panel-dark score-box">
+        <span className="label">{isSharedView ? 'Shared board' : 'Game over'}</span>
+        <div className="score-total">{score.total}</div>
+        <span className="label">out of 100</span>
+      </section>
+
+      <p className="stat" style={{ margin: 0 }}>
         <strong>Question:</strong> {question}
-      </div>
+      </p>
 
       {inForest && (
-        <div style={{ fontSize: '13px', color: '#166534', background: '#ecfdf5', padding: '10px', borderRadius: '6px' }}>
-          🌳 This tree now stands in your forest with {grove.length === 1 ? 'no others yet' : `${grove.length - 1} ${grove.length === 2 ? 'other' : 'others'}`}. Step back in the forest to see them all.
-        </div>
+        <p className="feedback">
+          This tree now stands in your forest with{' '}
+          {others === 0 ? 'no others yet' : `${others} ${others === 1 ? 'other' : 'others'}`}. Step back in the
+          forest to see them all.
+        </p>
       )}
 
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
-        <thead>
-          <tr style={{ color: '#64748b', textAlign: 'left' }}>
-            <th style={{ padding: '4px 0', fontWeight: 600 }}>Component</th>
-            <th style={{ padding: '4px 0', fontWeight: 600, textAlign: 'right' }}>Points</th>
-          </tr>
-        </thead>
-        <tbody>
-          {scoreRows(score).map(row => (
-            <tr key={row.label} style={{ borderTop: '1px solid #e2e8f0' }}>
-              <td style={{ padding: '6px 0', color: '#0f172a' }}>{row.label}</td>
-              <td
-                style={{
-                  padding: '6px 0',
-                  textAlign: 'right',
-                  fontVariantNumeric: 'tabular-nums',
-                  color: row.points < 0 ? '#b91c1c' : '#0f172a',
-                }}
-              >
-                {row.max === null ? row.points : `${row.points} / ${row.max}`}
-              </td>
+      <section className="panel">
+        <span className="label">Score</span>
+        <table className="score-table">
+          <thead>
+            <tr>
+              <th>Component</th>
+              <th className="num">Points</th>
             </tr>
-          ))}
-          <tr style={{ borderTop: '2px solid #cbd5e1', fontWeight: 700 }}>
-            <td style={{ padding: '6px 0' }}>Total</td>
-            <td style={{ padding: '6px 0', textAlign: 'right' }}>{score.total} / 100</td>
-          </tr>
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {scoreRows(score).map(row => (
+              <tr key={row.label}>
+                <td>{row.label}</td>
+                <td className={`num${row.points < 0 ? ' neg' : ''}`}>
+                  {row.max === null ? row.points : `${row.points} / ${row.max}`}
+                </td>
+              </tr>
+            ))}
+            <tr className="total">
+              <td>Total</td>
+              <td className="num">{score.total} / 100</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
 
       {score.openGaps.length > 0 && (
-        <div style={{ fontSize: '13px', color: '#0f172a' }}>
-          <div style={{ fontWeight: 600, marginBottom: '6px' }}>Open gaps ({score.openGaps.length})</div>
-          <ul style={{ margin: 0, paddingLeft: '18px', display: 'grid', gap: '4px', color: '#475569' }}>
+        <section className="panel">
+          <span className="label">Open gaps ({score.openGaps.length})</span>
+          <ul className="gap-list">
             {score.openGaps.map(id => {
               const node = byId.get(id);
               if (!node) return null;
               return (
                 <li key={id}>
-                  <strong style={{ color: '#0f172a' }}>{node.label}</strong>
-                  {' — '}
+                  <strong>{node.label}</strong>
+                  {' · '}
                   {node.isGap ? (node.gapReason ?? 'marked as a gap') : 'no resource or skill beneath it'}
                 </li>
               );
             })}
           </ul>
-        </div>
+        </section>
       )}
 
       {notice && (
-        <div style={{ background: '#ecfdf5', color: '#065f46', padding: '10px', borderRadius: '6px', fontSize: '13px' }}>
+        <p role="status" className="feedback">
           {notice}
-        </div>
+        </p>
       )}
       {manualCopy && (
         <textarea
           readOnly
+          className="input"
           value={manualCopy}
           aria-label="Text to copy by hand"
           onFocus={event => event.target.select()}
           rows={3}
-          style={{ width: '100%', boxSizing: 'border-box', fontSize: '11px', fontFamily: 'monospace' }}
         />
       )}
 
       {canUndoAgent && (
         <button
+          type="button"
+          className="btn btn-warn btn-block"
           onClick={() => setNotice(undoLastMove().message)}
           title="Take back the agent's final move and keep playing"
-          style={{ ...buttonStyle, background: '#f59e0b', color: '#1f2937' }}
         >
-          ↶ Undo agent's last move and resume
+          ↶ Undo agent&apos;s last move and resume
         </button>
       )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-        <button onClick={download} style={{ ...buttonStyle, background: '#10b981' }}>
-          ⬇ Export markdown
+      <div className="two-columns">
+        <button type="button" className="btn btn-dark" onClick={download}>
+          Export markdown
         </button>
-        <button onClick={() => copy(markdown, 'Markdown')} style={{ ...buttonStyle, background: '#64748b' }}>
+        <button type="button" className="btn btn-ghost" onClick={() => copy(markdown, 'Markdown')}>
           Copy markdown
         </button>
-        <button onClick={() => copy(shareUrl, 'Share link')} style={{ ...buttonStyle, background: '#0f172a' }}>
-          🔗 Copy share link
+        <button type="button" className="btn btn-ghost" onClick={() => copy(shareUrl, 'Share link')}>
+          Copy share link
         </button>
-        <button onClick={resetGame} style={{ ...buttonStyle, background: '#6366f1' }}>
-          🔄 New game
+        <button
+          type="button"
+          className="btn btn-primary"
+          onClick={newTree}
+          title="Clears the stage for a new question; this tree stays in the index and the forest"
+        >
+          New tree
         </button>
       </div>
 
-      <p style={footnoteStyle}>
+      <p className="footnote">
         The share link carries the whole board in its URL, so anyone who opens it sees this tree read-only. New
-        game clears the board and the link; the forest keeps the tree.
+        tree clears the board and the link; this tree stays in the question index and the forest.
       </p>
     </aside>
   );

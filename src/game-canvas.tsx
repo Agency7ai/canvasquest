@@ -27,6 +27,7 @@ export default function GameCanvas() {
   const nodes = useGameStore(state => state.nodes);
   const selectedNodeId = useGameStore(state => state.selectedNodeId);
   const selectNode = useGameStore(state => state.selectNode);
+  const openNoteEditor = useGameStore(state => state.openNoteEditor);
   const { fitView } = useReactFlow();
   // False while freshly added nodes still lack their measured size; fitView is
   // a no-op until every node is measured, so the effect below waits for it.
@@ -61,7 +62,7 @@ export default function GameCanvas() {
           type: 'smoothstep',
           animated: n.isGap,
           style: {
-            stroke: n.isGap ? '#ef4444' : implicitGaps.has(n.id) ? '#f59e0b' : '#64748b',
+            stroke: n.isGap ? '#c2563a' : implicitGaps.has(n.id) ? '#d9a441' : '#8fa38a',
             strokeWidth: 2,
           },
         })),
@@ -79,15 +80,22 @@ export default function GameCanvas() {
 
   const onNodeClick = useCallback((_event: unknown, node: Node) => selectNode(node.id), [selectNode]);
   const onPaneClick = useCallback(() => selectNode(null), [selectNode]);
+  // A double-click opens the node's Markdown note full screen.
+  const onNodeDoubleClick = useCallback(
+    (_event: unknown, node: Node) => openNoteEditor(node.id),
+    [openNoteEditor],
+  );
 
   return (
-    <div style={{ width: '100%', height: '100%' }}>
+    <div style={{ width: '100%', height: '100%', background: '#0f1f17' }}>
       <ReactFlow
         nodes={flowNodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onNodeDoubleClick={onNodeDoubleClick}
+        zoomOnDoubleClick={false}
         fitView
         minZoom={0.2}
         maxZoom={1.5}
@@ -97,7 +105,7 @@ export default function GameCanvas() {
         // React Flow, so the dropdown and the canvas always agree.
         elementsSelectable={false}
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+        <Background variant={BackgroundVariant.Dots} color="#33503f" gap={18} size={1} />
         <Controls showInteractive={false} />
       </ReactFlow>
     </div>

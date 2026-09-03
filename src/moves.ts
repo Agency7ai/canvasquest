@@ -1,7 +1,14 @@
 import { ACTIVE_BOARD_ID } from './app-meta';
 import { computeImplicitGaps, computeScore } from './scoring';
-import { useGameStore, BRANCH_KINDS, MOVES_PER_PLAYER, OPENING_MOVES } from './store';
-import type { GamePhase, NodeKind, PlayerType, Visualization } from './types';
+import {
+  useGameStore,
+  BRANCH_KINDS,
+  MAX_ANNOUNCEMENT_CHARS,
+  MAX_NOTE_CHARS,
+  MOVES_PER_PLAYER,
+  OPENING_MOVES,
+} from './store';
+import type { GamePhase, NodeKind, NoteEdit, PlayerType, Visualization } from './types';
 
 export interface MoveResult {
   success: boolean;
@@ -158,7 +165,9 @@ export type MoveName =
   | 'prune'
   | 'mark_gap'
   | 'annotate'
-  | 'pass';
+  | 'edit_note'
+  | 'pass'
+  | 'announce';
 
 /**
  * The one implementation of every agent move. Both the WebMCP tools and the
@@ -256,8 +265,25 @@ export function applyMove(name: MoveName, input: Record<string, unknown>): MoveR
       return { ...result, board: readBoard() };
     }
 
+    case 'edit_note': {
+      const reference = String(input.nodeId ?? '');
+      const nodeId = resolveNodeId(reference);
+      if (!nodeId) return unresolved(reference);
+      const mode = String(input.mode ?? '').trim().toLowerCase();
+      const text = String(input.text ?? '');
+      if (mode !== 'append' && mode !== 'replace') {
+        return { success: false, message: `Unknown mode "${mode}": use append or replace`, board: readBoard() };
+      }
+      const edit: NoteEdit = mode === 'append' ? { mode, text } : { mode, find: String(input.find ?? ''), text };
+      return { ...store.editNote(nodeId, edit, 'agent'), board: readBoard() };
+    }
+
     case 'pass': {
       const result = store.passTurn('agent');
+      return { ...result, board: readBoard() };
+    }
+    case 'announce': {
+      const result = store.announce(String(input.summary ?? ''), optionalText(input.handoff));
       return { ...result, board: readBoard() };
     }
   }
@@ -376,16 +402,35 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'annotate',
     description:
-      'Attach or replace a note and/or an http(s) url on any node. Free: costs no move and does not end your turn, so you can annotate on either turn. Each node with a note or url earns 1 point, up to 10. Pass an empty string to clear a field.',
+      'Attach or replace a note and/or an http(s) url on any node. Free: costs no move and does not end your turn, so you can annotate on either turn. Each node with a note or url earns 1 point, up to 10. Pass an empty string to clear a field. To add to a note or change one passage of it without retyping the rest, use edit_note.',
     readOnly: false,
     inputSchema: {
       type: 'object',
       properties: {
         nodeId: { type: 'string', description: NODE_REFERENCE },
-        note: { type: 'string', description: 'A short note for the node.' },
+        note: { type: 'string', description: 'The note for the node, in Markdown if you like: headings, lists, links and code all render.' },
         url: { type: 'string', description: 'An http(s) link for the node.' },
       },
       required: ['nodeId'],
+    },
+  },
+  {
+    name: 'edit_note',
+    description: `Co-write the Markdown note on a node with the human. Read the note first with get_node_state (it is the node's note field), then either append a new paragraph or section at the end, or replace one passage quoted exactly from the note. The human sees the change at once, even while the note is open in their editor, and keeps anything they are still typing. Free: costs no move and does not end your turn. Use annotate to replace a whole note. Notes are limited to ${MAX_NOTE_CHARS} characters.`,
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nodeId: { type: 'string', description: NODE_REFERENCE },
+        mode: {
+          type: 'string',
+          enum: ['append', 'replace'],
+          description: 'append adds text after the current note as a new paragraph; replace swaps the passage in find for text.',
+        },
+        text: { type: 'string', description: 'The Markdown to add, or the replacement for the passage in find (empty removes the passage).' },
+        find: { type: 'string', description: 'For replace only: a passage quoted exactly from the current note. It has to match exactly once, so quote enough of it.' },
+      },
+      required: ['nodeId', 'mode', 'text'],
     },
   },
   {
@@ -394,5 +439,26 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
       'End your turn without moving. Free: costs no move. During your opening this hands the board to the human, which is how the opening should end. Later, if both players yield in a row the game ends, so pass only when you have nothing to add or want the human to respond first.',
     readOnly: false,
     inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: 'announce',
+    description: `Tell the human what you are doing, in your own words. The page shows the text over the board and reads it aloud (unless a voice session is already speaking for you). Free: costs no move and never changes the turn, so call it in any phase. Call it right before or after each move with a one- or two-sentence first-person summary, and whenever you hand the board over (after a pass, or a move that ends your turn) add a handoff line that tells the human it is their turn and suggests what to do next. Keep each field under ${MAX_ANNOUNCEMENT_CHARS} characters.`,
+    readOnly: false,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        summary: {
+          type: 'string',
+          description:
+            'What you are doing and why, in one or two short first-person sentences. Example: I added the resource "Eloquent JavaScript" under Closures, which closes that gap.',
+        },
+        handoff: {
+          type: 'string',
+          description:
+            'Optional "your turn" line, spoken after the summary when you are handing the board to the human. Example: Your turn: fill the gap under Agent loops, or deepen another concept.',
+        },
+      },
+      required: ['summary'],
+    },
   },
 ];

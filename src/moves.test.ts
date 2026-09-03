@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { ACTIVE_BOARD_ID } from './app-meta';
 import { applyMove, readBoard } from './moves';
-import { MOVES_PER_PLAYER, OPENING_MOVES, useGameStore } from './store';
+import { MAX_ANNOUNCEMENT_CHARS, MOVES_PER_PLAYER, OPENING_MOVES, useGameStore } from './store';
 
 const QUESTION = 'How should I learn agentic web apps?';
 
@@ -143,5 +143,79 @@ describe('the agent opening through the tools', () => {
     expect(result.success, result.message).toBe(true);
     expect(result.board.question).toBe('How do I get started with woodworking?');
     expect(result.board.gamePhase).toBe('opening');
+  });
+});
+
+describe('announce', () => {
+  it("shows the agent's words without spending a move or changing the turn", () => {
+    applyMove('branch', { parentId: QUESTION, label: 'Agent loops', kind: 'concept' });
+    const movesBefore = useGameStore.getState().history.length;
+    const result = applyMove('announce', {
+      summary: '  I added Agent loops under the root.  ',
+      handoff: 'Your turn: put a resource under it.',
+    });
+    expect(result.success, result.message).toBe(true);
+    expect(result.board.currentPlayer).toBe('human');
+    expect(result.board.agentMoves).toBe(MOVES_PER_PLAYER - 1);
+    expect(result.board.totalNodes).toBe(2);
+    expect(useGameStore.getState().history).toHaveLength(movesBefore);
+    expect(useGameStore.getState().announcement).toMatchObject({
+      summary: 'I added Agent loops under the root.',
+      handoff: 'Your turn: put a resource under it.',
+    });
+  });
+
+  it('is free in every phase, even before a game starts', () => {
+    useGameStore.getState().resetGame();
+    const result = applyMove('announce', { summary: 'Tell me what you want to learn.' });
+    expect(result.success, result.message).toBe(true);
+    expect(result.board.gamePhase).toBe('setup');
+    expect(useGameStore.getState().announcement?.handoff).toBeUndefined();
+  });
+
+  it('rejects an empty or long-winded announcement', () => {
+    expect(applyMove('announce', {}).success).toBe(false);
+    expect(applyMove('announce', { summary: '   ' }).success).toBe(false);
+    expect(applyMove('announce', { summary: 'x'.repeat(MAX_ANNOUNCEMENT_CHARS + 1) }).success).toBe(false);
+    expect(
+      applyMove('announce', { summary: 'Short.', handoff: 'y'.repeat(MAX_ANNOUNCEMENT_CHARS + 1) }).success,
+    ).toBe(false);
+    expect(useGameStore.getState().announcement).toBeNull();
+  });
+});
+
+describe('edit_note', () => {
+  it('appends to and edits a note by label, for free, without ending the turn', () => {
+    const movesBefore = useGameStore.getState().history.length;
+    const appended = applyMove('edit_note', { nodeId: QUESTION, mode: 'append', text: '## Plan\n\nRead the docs.' });
+    expect(appended.success, appended.message).toBe(true);
+    expect(appended.nodeId).toBe('n1');
+    expect(appended.board.currentPlayer).toBe('agent');
+    expect(appended.board.agentMoves).toBe(MOVES_PER_PLAYER);
+    expect(appended.board.nodes[0].note).toBe('## Plan\n\nRead the docs.');
+
+    const edited = applyMove('edit_note', {
+      nodeId: 'n1',
+      mode: ' Replace ',
+      find: 'Read the docs.',
+      text: 'Read the docs, then build something.',
+    });
+    expect(edited.success, edited.message).toBe(true);
+    expect(edited.board.nodes[0].note).toBe('## Plan\n\nRead the docs, then build something.');
+    // One run of edits by the agent is one entry in the history.
+    expect(useGameStore.getState().history).toHaveLength(movesBefore + 1);
+  });
+
+  it('explains a bad mode, a missing passage and an unknown node', () => {
+    const mode = applyMove('edit_note', { nodeId: 'n1', mode: 'insert', text: 'x' });
+    expect(mode.success).toBe(false);
+    expect(mode.message).toContain('append or replace');
+    expect(applyMove('edit_note', { nodeId: 'n1', mode: 'replace', text: 'x' }).message).toContain('find');
+    const missing = applyMove('edit_note', { nodeId: 'n1', mode: 'replace', find: 'nowhere', text: 'x' });
+    expect(missing.success).toBe(false);
+    expect(missing.message).toContain('get_node_state');
+    const unknown = applyMove('edit_note', { nodeId: 'No such node', mode: 'append', text: 'x' });
+    expect(unknown.success).toBe(false);
+    expect(useGameStore.getState().nodes[0].note).toBeUndefined();
   });
 });

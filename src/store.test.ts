@@ -1,14 +1,16 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { computeScore } from './scoring';
 import {
+  MAX_ANNOUNCEMENT_CHARS,
   MAX_GROVE,
+  MAX_NOTE_CHARS,
   MOVES_PER_PLAYER,
   OPENING_MOVES,
   PASSES_TO_END,
   type MoveOutcome,
   useGameStore,
 } from './store';
-import type { GameAction, PlayerType, SavedGame, TreeNode } from './types';
+import type { GameAction, NoteEdit, PlayerType, SavedGame, TreeNode } from './types';
 
 const QUESTION = 'How should I learn agentic web apps?';
 
@@ -65,6 +67,7 @@ function growQuickTree(question: string): void {
 beforeEach(() => {
   state().resetGame();
   state().setGrove([]);
+  state().setTrees([], null);
   ok(state().startGame(QUESTION));
 });
 
@@ -475,7 +478,7 @@ describe('forest', () => {
     expect(state().grove).toHaveLength(0);
   });
 
-  it('revisits a planted tree only between games', () => {
+  it('revisits a planted tree from any phase, parking the game being played', () => {
     const root = plantRoot();
     playUntilBudgetsRunOut(root);
     const tree = state().grove[0];
@@ -488,11 +491,14 @@ describe('forest', () => {
     expect(state().nodes).toEqual(tree.nodes);
     expect(state().isSharedView).toBe(false);
 
-    state().resetGame();
-    ok(state().startGame(QUESTION));
-    rejected(state().openFromForest(tree.id));
+    ok(state().startGame('Another question'));
     ok(state().joinGame());
-    rejected(state().openFromForest(tree.id));
+    ok(state().plant('Another question', 'human'));
+    const parked = state().currentTreeId;
+    ok(state().openFromForest(tree.id));
+    expect(state().gamePhase).toBe('ended');
+    expect(state().nodes).toEqual(tree.nodes);
+    expect(state().trees.find(t => t.id === parked)?.game.gamePhase).toBe('playing');
   });
 
   it('fells a tree and drops the focus on it', () => {
@@ -503,5 +509,363 @@ describe('forest', () => {
     state().removeFromForest(tree.id);
     expect(state().grove).toHaveLength(0);
     expect(state().focusedTreeId).toBeNull();
+  });
+});
+
+describe('question index', () => {
+  it('lists each started game as a tree and points at the one on the board', () => {
+    expect(state().trees.map(t => t.game.question)).toEqual([QUESTION]);
+    expect(state().currentTreeId).toBe(state().trees[0].id);
+    ok(state().startGame('Second question'));
+    expect(state().trees.map(t => t.game.question)).toEqual([QUESTION, 'Second question']);
+    expect(state().currentTreeId).toBe(state().trees[1].id);
+    expect(state().trees[0].game.gamePhase).toBe('opening');
+  });
+
+  it('parks the board with its moves and history when switching, and brings it back whole', () => {
+    const root = plantRoot();
+    ok(state().branch(root, 'Agent topic', 'concept', 'agent'));
+    const first = state().currentTreeId ?? '';
+    ok(state().startGame('Second question'));
+    ok(state().plant('Second question', 'human'));
+    const second = state().currentTreeId ?? '';
+    expect(second).not.toBe(first);
+
+    ok(state().switchTree(first));
+    expect(state().currentTreeId).toBe(first);
+    expect(state().question).toBe(QUESTION);
+    expect(state().nodes).toHaveLength(2);
+    expect(state().history).toHaveLength(2);
+    expect(state().agentMoves).toBe(MOVES_PER_PLAYER - 1);
+    expect(state().currentPlayer).toBe('human');
+    expect(state().gamePhase).toBe('playing');
+    expect(state().isSharedView).toBe(false);
+
+    const parked = state().trees.find(t => t.id === second);
+    expect(parked?.game.nodes).toHaveLength(1);
+    expect(parked?.game.currentPlayer).toBe('agent');
+
+    ok(state().switchTree(second));
+    expect(state().question).toBe('Second question');
+    expect(state().nodes).toHaveLength(1);
+    ok(state().switchTree(second));
+    rejected(state().switchTree('not-a-tree'));
+  });
+
+  it('keeps node ids unique within a tree after a switch', () => {
+    plantRoot();
+    ok(state().branch('n1', 'A', 'concept', 'agent'));
+    const first = state().currentTreeId ?? '';
+    ok(state().startGame('Second question'));
+    ok(state().plant('Second question', 'human'));
+    ok(state().switchTree(first));
+    expect(ok(state().branch('n1', 'B', 'concept', 'human'))).toBe('n3');
+  });
+
+  it('closes the note editor and drops the selection and the announcement on a switch', () => {
+    const root = plantRoot();
+    ok(state().announce('Opening.'));
+    state().openNoteEditor(root);
+    const first = state().currentTreeId ?? '';
+    ok(state().startGame('Second question'));
+    ok(state().switchTree(first));
+    expect(state().noteEditorNodeId).toBeNull();
+    expect(state().selectedNodeId).toBeNull();
+    expect(state().announcement).toBeNull();
+  });
+
+  it('starts a new tree beside the parked one and deletes trees from the index', () => {
+    const first = state().currentTreeId ?? '';
+    state().newTree();
+    expect(state().gamePhase).toBe('setup');
+    expect(state().currentTreeId).toBeNull();
+    expect(state().trees.map(t => t.id)).toEqual([first]);
+
+    ok(state().plant('Second question', 'human'));
+    expect(state().trees).toHaveLength(2);
+    const second = state().currentTreeId ?? '';
+    expect(state().trees[1].game.nodes).toHaveLength(1);
+
+    state().removeTree(first);
+    expect(state().trees.map(t => t.id)).toEqual([second]);
+    expect(state().gamePhase).toBe('playing');
+
+    state().removeTree(second);
+    expect(state().trees).toHaveLength(0);
+    expect(state().gamePhase).toBe('setup');
+    expect(state().currentTreeId).toBeNull();
+  });
+
+  it('drops the tree being played on reset, but keeps it on new tree', () => {
+    state().resetGame();
+    expect(state().trees).toHaveLength(0);
+    ok(state().startGame(QUESTION));
+    state().newTree();
+    expect(state().trees).toHaveLength(1);
+    expect(state().trees[0].game.question).toBe(QUESTION);
+  });
+
+  it('gives a shared board no entry and leaves the index alone', () => {
+    const shared: SavedGame = {
+      question: 'Shared question',
+      nodes: [{ id: 'n1', label: 'Shared question', kind: 'root', parentId: null, createdBy: 'human', isGap: false }],
+      humanMoves: 0,
+      agentMoves: 0,
+      currentPlayer: 'human',
+      gamePhase: 'ended',
+      history: [],
+      openingMovesUsed: 0,
+    };
+    state().loadGame(shared, { shared: true });
+    expect(state().currentTreeId).toBeNull();
+    expect(state().trees).toHaveLength(1);
+    state().resetGame();
+    expect(state().trees).toHaveLength(1);
+  });
+
+  it('opens a planted tree through its own entry, keeping the history', () => {
+    const root = plantRoot();
+    playUntilBudgetsRunOut(root);
+    const tree = state().grove[0];
+    const played = state().currentTreeId ?? '';
+    const moves = state().history.length;
+    ok(state().startGame('Second question'));
+    ok(state().openFromForest(tree.id));
+    expect(state().currentTreeId).toBe(played);
+    expect(state().history).toHaveLength(moves);
+    expect(state().trees.map(t => t.game.question)).toEqual([QUESTION, 'Second question']);
+  });
+
+  it('adds a planted tree to the index when its game is gone', () => {
+    const root = plantRoot();
+    playUntilBudgetsRunOut(root);
+    const tree = state().grove[0];
+    state().resetGame();
+    expect(state().trees).toHaveLength(0);
+    ok(state().openFromForest(tree.id));
+    expect(state().gamePhase).toBe('ended');
+    expect(state().nodes).toEqual(tree.nodes);
+    expect(state().trees).toHaveLength(1);
+    expect(state().currentTreeId).toBe(state().trees[0].id);
+    expect(state().trees[0].game.question).toBe(QUESTION);
+  });
+});
+
+describe('announcements', () => {
+  it('keeps only the latest line and numbers each one', () => {
+    ok(state().announce('I am opening with three branches.'));
+    const first = state().announcement;
+    expect(first?.summary).toBe('I am opening with three branches.');
+    expect(first?.handoff).toBeUndefined();
+    ok(state().announce('Done opening.', '  Your turn: pick a branch to deepen.  '));
+    const second = state().announcement;
+    expect(second?.id).toBeGreaterThan(first?.id ?? 0);
+    expect(second?.handoff).toBe('Your turn: pick a branch to deepen.');
+    expect(state().history).toHaveLength(0);
+    expect(state().currentPlayer).toBe('agent');
+  });
+
+  it('drops the line when dismissed, and when a game starts or resets', () => {
+    ok(state().announce('Hello.'));
+    state().dismissAnnouncement();
+    expect(state().announcement).toBeNull();
+    ok(state().announce('Hello again.'));
+    ok(state().startGame(QUESTION));
+    expect(state().announcement).toBeNull();
+    ok(state().announce('And again.'));
+    state().resetGame();
+    expect(state().announcement).toBeNull();
+  });
+
+  it('rejects an empty or long-winded line', () => {
+    rejected(state().announce('   '));
+    rejected(state().announce('x'.repeat(MAX_ANNOUNCEMENT_CHARS + 1)));
+    rejected(state().announce('Fine.', 'y'.repeat(MAX_ANNOUNCEMENT_CHARS + 1)));
+    expect(state().announcement).toBeNull();
+  });
+});
+
+describe('unmark gap', () => {
+  it('lets the human clear a gap they marked, for free, and refunds the move', () => {
+    const root = plantRoot();
+    const concept = ok(state().branch(root, 'Agent loops', 'concept', 'agent'));
+    ok(state().markGap(concept, 'human', 'Needs a resource'));
+    expect(budget('human')).toBe(MOVES_PER_PLAYER - 1);
+    expect(nodeById(concept).gapBy).toBe('human');
+    const before = { turn: state().currentPlayer, agent: budget('agent'), moves: state().history.length };
+
+    ok(state().unmarkGap(concept));
+    expect(nodeById(concept).isGap).toBe(false);
+    expect(nodeById(concept).gapReason).toBeUndefined();
+    expect(nodeById(concept).gapBy).toBeUndefined();
+    expect(budget('human')).toBe(MOVES_PER_PLAYER);
+    expect(budget('agent')).toBe(before.agent);
+    expect(state().currentPlayer).toBe(before.turn);
+
+    const last = state().history[before.moves];
+    expect(state().history).toHaveLength(before.moves + 1);
+    expect(last.type).toBe('unmark_gap');
+    expect(last.player).toBe('human');
+    expect(last.costsMove).toBe(false);
+  });
+
+  it('refuses gaps the agent marked and nodes that are not gaps', () => {
+    const root = plantRoot();
+    const concept = ok(state().branch(root, 'Agent loops', 'concept', 'agent'));
+    expect(rejected(state().unmarkGap(concept))).toContain('not a gap');
+
+    ok(state().passTurn('human'));
+    ok(state().markGap(concept, 'agent', 'Needs practice'));
+    expect(nodeById(concept).gapBy).toBe('agent');
+    expect(rejected(state().unmarkGap(concept))).toContain('marked yourself');
+    expect(nodeById(concept).isGap).toBe(true);
+    expect(budget('human')).toBe(MOVES_PER_PLAYER);
+    rejected(state().unmarkGap('n99'));
+  });
+
+  it('lets the human mark the same node again once it is their turn', () => {
+    const root = plantRoot();
+    const concept = ok(state().branch(root, 'Agent loops', 'concept', 'agent'));
+    ok(state().markGap(concept, 'human'));
+    ok(state().unmarkGap(concept));
+    // Unmarking did not hand the turn back: it is still the agent's.
+    rejected(state().markGap(concept, 'human'));
+    ok(state().branch(root, 'Another topic', 'concept', 'agent'));
+    ok(state().markGap(concept, 'human', 'Second thoughts'));
+    expect(nodeById(concept).gapReason).toBe('Second thoughts');
+    expect(budget('human')).toBe(MOVES_PER_PLAYER - 1);
+  });
+
+  it('is blocked before the game starts and after it ends', () => {
+    state().resetGame();
+    rejected(state().unmarkGap('n1'));
+    ok(state().startGame(QUESTION));
+    const root = plantRoot();
+    playUntilBudgetsRunOut(root);
+    rejected(state().unmarkGap(root));
+  });
+});
+
+describe('notes', () => {
+  it('keeps a Markdown note up to the limit and refuses a longer one', () => {
+    const root = plantRoot();
+    const markdown = '# Heading\n\n- a list\n- with `code`\n\n[link](https://example.com)';
+    ok(state().annotate(root, { note: markdown }, 'human'));
+    expect(nodeById(root).note).toBe(markdown);
+
+    ok(state().annotate(root, { note: 'x'.repeat(MAX_NOTE_CHARS) }, 'human'));
+    expect(rejected(state().annotate(root, { note: 'x'.repeat(MAX_NOTE_CHARS + 1) }, 'human'))).toContain(
+      String(MAX_NOTE_CHARS),
+    );
+    expect(nodeById(root).note).toHaveLength(MAX_NOTE_CHARS);
+  });
+
+  it('opens the editor on a node, selects it, and forgets it when the game resets', () => {
+    const root = plantRoot();
+    state().openNoteEditor(root);
+    expect(state().noteEditorNodeId).toBe(root);
+    expect(state().selectedNodeId).toBe(root);
+
+    state().closeNoteEditor();
+    expect(state().noteEditorNodeId).toBeNull();
+
+    state().openNoteEditor(root);
+    state().resetGame();
+    expect(state().noteEditorNodeId).toBeNull();
+  });
+});
+
+describe('co-writing a note', () => {
+  const editNote = (nodeId: string, edit: NoteEdit, player: PlayerType = 'agent') =>
+    state().editNote(nodeId, edit, player);
+
+  it('appends a paragraph for free, on either turn, without touching the budgets', () => {
+    const root = plantRoot();
+    ok(state().annotate(root, { note: '# Plan' }, 'human'));
+    const before = { history: state().history.length, player: state().currentPlayer, moves: budget('agent') };
+    ok(editNote(root, { mode: 'append', text: '  ## From the agent\n\nFirst step.  ' }));
+    expect(nodeById(root).note).toBe('# Plan\n\n## From the agent\n\nFirst step.');
+    expect(state().currentPlayer).toBe(before.player);
+    expect(budget('agent')).toBe(before.moves);
+    expect(state().history).toHaveLength(before.history + 1);
+    expect(state().history.at(-1)).toMatchObject({ type: 'annotate', player: 'agent', nodeId: root, costsMove: false });
+    // The human writes on the agent's turn just the same.
+    ok(editNote(root, { mode: 'append', text: 'Mine.' }, 'human'));
+    expect(nodeById(root).note).toBe('# Plan\n\n## From the agent\n\nFirst step.\n\nMine.');
+  });
+
+  it('starts a note by appending to a node without one, and asks for text', () => {
+    const root = plantRoot();
+    ok(editNote(root, { mode: 'append', text: 'Fresh.' }));
+    expect(nodeById(root).note).toBe('Fresh.');
+    expect(rejected(editNote(root, { mode: 'append', text: '   ' }))).toContain('append');
+  });
+
+  it('replaces a passage that occurs exactly once, keeping the rest verbatim', () => {
+    const root = plantRoot();
+    ok(state().annotate(root, { note: 'Alpha, beta, gamma. $& stays.' }, 'human'));
+    ok(editNote(root, { mode: 'replace', find: 'beta', text: 'BETA $1' }));
+    expect(nodeById(root).note).toBe('Alpha, BETA $1, gamma. $& stays.');
+    ok(editNote(root, { mode: 'replace', find: ' $& stays.', text: '' }));
+    expect(nodeById(root).note).toBe('Alpha, BETA $1, gamma.');
+  });
+
+  it('refuses a passage that is missing or ambiguous, with a hint', () => {
+    const root = plantRoot();
+    ok(state().annotate(root, { note: 'one two one' }, 'human'));
+    expect(rejected(editNote(root, { mode: 'replace', find: 'three', text: 'x' }))).toContain('get_node_state');
+    expect(rejected(editNote(root, { mode: 'replace', find: 'one', text: 'x' }))).toContain('2 times');
+    expect(rejected(editNote(root, { mode: 'replace', find: '  ', text: 'x' }))).toContain('find');
+    expect(nodeById(root).note).toBe('one two one');
+  });
+
+  it('keeps the note under the cap', () => {
+    const root = plantRoot();
+    ok(state().annotate(root, { note: 'x'.repeat(MAX_NOTE_CHARS - 1) }, 'human'));
+    expect(rejected(editNote(root, { mode: 'append', text: 'yy' }))).toContain(String(MAX_NOTE_CHARS));
+    expect(nodeById(root).note).toHaveLength(MAX_NOTE_CHARS - 1);
+  });
+
+  it('is blocked before a game starts and once it has ended', () => {
+    state().resetGame();
+    expect(rejected(editNote('n1', { mode: 'append', text: 'x' }))).toContain('not started');
+    ok(state().startGame(QUESTION));
+    const root = plantRoot();
+    playUntilBudgetsRunOut(root);
+    expect(rejected(editNote(root, { mode: 'append', text: 'x' }))).toContain('over');
+    expect(rejected(editNote('n999', { mode: 'append', text: 'x' }, 'human'))).toBeTruthy();
+  });
+});
+
+describe('note history', () => {
+  it('folds a run of note changes by one player on one node into a single undoable entry', () => {
+    const root = plantRoot();
+    const before = state().history.length;
+    ok(state().annotate(root, { note: 'a' }, 'agent'));
+    ok(state().annotate(root, { note: 'ab', url: 'https://example.com' }, 'agent'));
+    ok(state().editNote(root, { mode: 'append', text: 'c' }, 'agent'));
+    expect(state().history).toHaveLength(before + 1);
+    expect(state().history.at(-1)).toMatchObject({ type: 'annotate', player: 'agent', nodeId: root });
+    ok(state().undoLastMove());
+    expect(nodeById(root).note).toBeUndefined();
+    expect(nodeById(root).url).toBeUndefined();
+    expect(state().history).toHaveLength(before);
+  });
+
+  it('starts a new entry when the player or the node changes', () => {
+    const root = plantRoot();
+    const child = ok(state().branch(root, 'Loops', 'concept', 'agent'));
+    const before = state().history.length;
+    ok(state().annotate(root, { note: 'a' }, 'human'));
+    ok(state().annotate(root, { note: 'b' }, 'human'));
+    ok(state().editNote(root, { mode: 'append', text: 'c' }, 'agent'));
+    ok(state().editNote(root, { mode: 'append', text: 'd' }, 'human'));
+    ok(state().annotate(child, { note: 'e' }, 'human'));
+    expect(state().history.slice(before).map(action => `${action.player}:${action.nodeId}`)).toEqual([
+      `human:${root}`,
+      `agent:${root}`,
+      `human:${root}`,
+      `human:${child}`,
+    ]);
   });
 });

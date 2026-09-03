@@ -2,9 +2,12 @@ import { create } from 'zustand';
 import { computeScore, fillsGap } from './scoring';
 import type {
   ActionType,
+  Announcement,
   GameAction,
   GameState,
+  IndexedTree,
   NodeContent,
+  NoteEdit,
   NodeKind,
   PlantedTree,
   PlayerType,
@@ -41,11 +44,23 @@ export const PERSIST_DEBOUNCE_MS = 300;
 /** Finished trees kept standing in the forest; the oldest falls when it is full. */
 export const MAX_GROVE = 12;
 
+/**
+ * Longest summary or handoff an announcement may carry. The page reads them
+ * aloud, and nobody should have to sit through an essay.
+ */
+export const MAX_ANNOUNCEMENT_CHARS = 200;
+
+/** A note is a Markdown document, but the board still has to fit a share link. */
+export const MAX_NOTE_CHARS = 20000;
+
 /** Kinds a child node may have. The root is created only by plant. */
 export const BRANCH_KINDS: readonly NodeKind[] = ['concept', 'resource', 'skill'];
 
 // Short ids so a voice agent can say and hear them reliably.
 let nodeCounter = 0;
+
+/** Announcements are numbered across games so a repeated line still reads as new. */
+let announcementCounter = 0;
 const nextNodeId = () => `n${++nodeCounter}`;
 
 /** Highest n<number> id in a node list, so restored games keep ids unique. */
@@ -56,7 +71,12 @@ function highestNodeNumber(nodes: TreeNode[]): number {
   }, 0);
 }
 
-const newTreeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+/** Ids for trees, in the forest and in the question index alike. */
+export const newTreeId = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+
+/** Two boards with the same nodes, whatever objects hold them. */
+const sameNodes = (a: TreeNode[], b: TreeNode[]) =>
+  a.length === b.length && JSON.stringify(a) === JSON.stringify(b);
 
 /** The selection survives a change only if the node still exists. */
 const keepSelection = (selectedNodeId: string | null, nodes: TreeNode[]) =>
@@ -113,7 +133,13 @@ export function normalizeUrl(raw: string): string | null {
  */
 function parseContent(content: NodeContent): { value: NodeContent; error?: string } {
   const value: NodeContent = {};
-  if (content.note !== undefined) value.note = content.note.trim() || undefined;
+  if (content.note !== undefined) {
+    const note = content.note.trim();
+    if (note.length > MAX_NOTE_CHARS) {
+      return { value, error: `Notes are limited to ${MAX_NOTE_CHARS} characters` };
+    }
+    value.note = note || undefined;
+  }
   if (content.url !== undefined) {
     const raw = content.url.trim();
     if (!raw) {
@@ -127,6 +153,9 @@ function parseContent(content: NodeContent): { value: NodeContent; error?: strin
   return { value };
 }
 
+/** The start of a passage, short enough to quote in a message. */
+const excerpt = (text: string) => (text.length > 40 ? `${text.slice(0, 40)}…` : text);
+
 /** Applies note/url changes, dropping keys that were cleared. */
 function withContent(node: TreeNode, content: NodeContent): TreeNode {
   const next: TreeNode = { ...node, ...content };
@@ -138,6 +167,7 @@ function withContent(node: TreeNode, content: NodeContent): TreeNode {
 function clearGap(node: TreeNode): TreeNode {
   const cleared: TreeNode = { ...node, isGap: false };
   delete cleared.gapReason;
+  delete cleared.gapBy;
   return cleared;
 }
 
@@ -153,6 +183,8 @@ export function describeAction(action: GameAction): string {
       return `pruned ${label}`;
     case 'mark_gap':
       return `marked ${label} as a gap`;
+    case 'unmark_gap':
+      return `unmarked the gap on ${label}`;
     case 'annotate':
       return `annotated ${label}`;
   }
@@ -175,12 +207,63 @@ export function plantTree(grove: PlantedTree[], question: string, nodes: TreeNod
   return [...grove.filter(t => t.question !== question), tree].slice(-MAX_GROVE);
 }
 
+/** Picks the persisted fields out of the store state. */
+export function snapshotGame(state: SavedGame): SavedGame {
+  return {
+    question: state.question,
+    nodes: state.nodes,
+    humanMoves: state.humanMoves,
+    agentMoves: state.agentMoves,
+    currentPlayer: state.currentPlayer,
+    gamePhase: state.gamePhase,
+    history: state.history,
+    openingMovesUsed: state.openingMovesUsed,
+  };
+}
+
+const sameGame = (a: SavedGame, b: SavedGame) =>
+  a.question === b.question &&
+  a.nodes === b.nodes &&
+  a.history === b.history &&
+  a.humanMoves === b.humanMoves &&
+  a.agentMoves === b.agentMoves &&
+  a.currentPlayer === b.currentPlayer &&
+  a.gamePhase === b.gamePhase &&
+  a.openingMovesUsed === b.openingMovesUsed;
+
+type IndexView = SavedGame & Pick<GameStore, 'trees' | 'currentTreeId' | 'isSharedView'>;
+
+/**
+ * The question index with the board being played written back into its own
+ * entry, so the entry is current when the board is parked or saved. A shared
+ * board and the empty setup board belong to no entry. Returns the same array
+ * when nothing changed.
+ */
+export function shelveCurrent(state: IndexView): IndexedTree[] {
+  const { trees, currentTreeId } = state;
+  if (currentTreeId === null || state.isSharedView || state.gamePhase === 'setup') return trees;
+  const existing = trees.find(tree => tree.id === currentTreeId);
+  if (existing && sameGame(existing.game, state)) return trees;
+  const entry: IndexedTree = { id: currentTreeId, game: snapshotGame(state), updatedAt: Date.now() };
+  return existing ? trees.map(tree => (tree.id === currentTreeId ? entry : tree)) : [...trees, entry];
+}
+
 interface GameStore extends GameState {
   isVoiceConnected: boolean;
   setVoiceConnected: (connected: boolean) => void;
+  /** The agent's latest announcement, which the page shows and reads aloud. */
+  announcement: Announcement | null;
+  /** Free: the agent narrating what it does. Never touches the board or the turn. */
+  announce: (summary: string, handoff?: string) => MoveOutcome;
+  dismissAnnouncement: () => void;
   /** The node the human clicked, shared by the forest, the board and the controls. */
   selectedNodeId: string | null;
   selectNode: (nodeId: string | null) => void;
+  /** The node whose Markdown note is open full screen, or null. */
+  noteEditorNodeId: string | null;
+  /** Opens the full-screen note on a node, selecting it too. */
+  openNoteEditor: (nodeId: string) => void;
+  closeNoteEditor: () => void;
   /** True when the board came from a share link and must not be autosaved. */
   isSharedView: boolean;
   /** The forest is the default everywhere; the flat board is a labelled alternative. */
@@ -192,9 +275,22 @@ interface GameStore extends GameState {
   /** Finished trees standing around the clearing. */
   grove: PlantedTree[];
   setGrove: (grove: PlantedTree[]) => void;
+  /** The question index: every tree the human can switch to, oldest first. */
+  trees: IndexedTree[];
+  /** The index entry the board belongs to; null in setup and on a shared board. */
+  currentTreeId: string | null;
+  setTrees: (trees: IndexedTree[], currentTreeId: string | null) => void;
+  /** Parks the board in its index entry and brings another tree up as the board. */
+  switchTree: (treeId: string) => MoveOutcome;
+  /** Parks the board in the index and returns to setup, ready for a new question. */
+  newTree: () => void;
+  /** Drops a tree from the index. Dropping the one on the board clears the board. */
+  removeTree: (treeId: string) => void;
+  /** A shared board belongs to no index entry; anything else keeps its entry. */
   loadGame: (saved: SavedGame, options?: { shared?: boolean }) => void;
-  /** Starts a game on the question and hands the empty board to the agent to open. */
+  /** Starts a game on the question, as a new tree in the index, and hands the empty board to the agent to open. */
   startGame: (question: string) => MoveOutcome;
+  /** Clears the board and drops its tree from the index. The forest keeps a finished tree. */
   resetGame: () => void;
   /** The human stepping in during the agent's opening; the opening ends. */
   joinGame: () => MoveOutcome;
@@ -212,15 +308,19 @@ interface GameStore extends GameState {
   ) => MoveOutcome;
   prune: (nodeId: string, player: PlayerType) => MoveOutcome;
   markGap: (nodeId: string, player: PlayerType, reason?: string) => MoveOutcome;
+  /** Free, human only: clears a gap the human marked and gives the move back. */
+  unmarkGap: (nodeId: string) => MoveOutcome;
   /** Free: consumes no move and does not change the turn. */
   annotate: (nodeId: string, content: NodeContent, player: PlayerType) => MoveOutcome;
+  /** Free: adds to a note or replaces one passage of it, keeping the rest. */
+  editNote: (nodeId: string, edit: NoteEdit, player: PlayerType) => MoveOutcome;
   /** Free: yields the turn. Two yields in a row end the game. */
   passTurn: (player: PlayerType) => MoveOutcome;
   /** The human forcing the agent to yield; counts as an agent pass. */
   skipAgentTurn: () => MoveOutcome;
   /** Reverts the most recent action, which must be the agent's. */
   undoLastMove: () => MoveOutcome;
-  /** Brings a planted tree back as the active, finished board. */
+  /** Brings a planted tree back as the finished board, parking whatever was being played. */
   openFromForest: (treeId: string) => MoveOutcome;
   removeFromForest: (treeId: string) => void;
 }
@@ -282,6 +382,18 @@ export const useGameStore = create<GameStore>((set, get) => {
     before: get().nodes,
     ...fields,
   });
+
+  /**
+   * The history after a note or url change. A run of changes by one player
+   * to one node shares a single entry: the editor saves as the human types
+   * and an agent co-writing a note edits it in small steps, and neither
+   * should flood the log. Undo then takes the whole run back at once.
+   */
+  const withAnnotation = (state: GameState, player: PlayerType, node: TreeNode): GameAction[] => {
+    const last = state.history[state.history.length - 1];
+    if (last?.type === 'annotate' && last.player === player && last.nodeId === node.id) return state.history;
+    return [...state.history, record('annotate', player, false, { nodeId: node.id, label: node.label, kind: node.kind })];
+  };
 
   /** Ends the game and plants the finished tree in the forest. */
   const endGame = (patch: Partial<GameState> = {}) => {
@@ -360,24 +472,100 @@ export const useGameStore = create<GameStore>((set, get) => {
     return ok(`${capitalize(from)} ${verb}. It is the ${to}'s turn`);
   };
 
+  /**
+   * Back to the empty setup board with the given index. Nothing of the board
+   * survives here: callers park it in the index first, or mean to drop it.
+   */
+  const toSetup = (trees: IndexedTree[]) => {
+    nodeCounter = 0;
+    set({
+      ...initialState,
+      selectedNodeId: null,
+      noteEditorNodeId: null,
+      focusedTreeId: null,
+      isSharedView: false,
+      announcement: null,
+      trees,
+      currentTreeId: null,
+    });
+  };
+
+  /** Puts a game on the board as the given index entry. */
+  const bringUp = (treeId: string, game: SavedGame, trees: IndexedTree[]) => {
+    get().loadGame(game);
+    set({ trees, currentTreeId: treeId, announcement: null });
+  };
+
   return {
     ...initialState,
     isVoiceConnected: false,
+    announcement: null,
     selectedNodeId: null,
+    noteEditorNodeId: null,
     isSharedView: false,
     visualization: 'forest',
     focusedTreeId: null,
     grove: [],
+    trees: [],
+    currentTreeId: null,
 
     setVoiceConnected: connected => set({ isVoiceConnected: connected }),
 
+    announce: (rawSummary, rawHandoff) => {
+      const summary = rawSummary.trim();
+      const handoff = rawHandoff?.trim() ?? '';
+      if (!summary) return fail('Say what you are doing: the summary is empty');
+      if (summary.length > MAX_ANNOUNCEMENT_CHARS || handoff.length > MAX_ANNOUNCEMENT_CHARS) {
+        return fail(
+          `Keep the summary and the handoff under ${MAX_ANNOUNCEMENT_CHARS} characters each: they are read aloud`,
+        );
+      }
+      announcementCounter += 1;
+      const announcement: Announcement = { id: announcementCounter, summary, at: Date.now() };
+      if (handoff) announcement.handoff = handoff;
+      set({ announcement });
+      return ok(
+        get().isVoiceConnected
+          ? 'Shown on the page. Your voice session is speaking, so the page stays quiet'
+          : 'Shown on the page and read aloud',
+      );
+    },
+
+    dismissAnnouncement: () => set({ announcement: null }),
+
     selectNode: nodeId => set({ selectedNodeId: nodeId }),
+
+    openNoteEditor: nodeId => set({ noteEditorNodeId: nodeId, selectedNodeId: nodeId }),
+
+    closeNoteEditor: () => set({ noteEditorNodeId: null }),
 
     setVisualization: visualization => set({ visualization }),
 
     setFocusedTreeId: treeId => set({ focusedTreeId: treeId }),
 
     setGrove: grove => set({ grove }),
+
+    setTrees: (trees, currentTreeId) => set({ trees, currentTreeId }),
+
+    switchTree: treeId => {
+      const state = get();
+      const tree = state.trees.find(entry => entry.id === treeId);
+      if (!tree) return fail('That tree is not in the question index');
+      if (treeId === state.currentTreeId && !state.isSharedView) {
+        return ok(`"${state.question}" is already on the board`);
+      }
+      bringUp(treeId, tree.game, shelveCurrent(state));
+      return ok(`Switched to "${tree.game.question}"`);
+    },
+
+    newTree: () => toSetup(shelveCurrent(get())),
+
+    removeTree: treeId => {
+      const state = get();
+      const trees = state.trees.filter(tree => tree.id !== treeId);
+      if (treeId === state.currentTreeId) toSetup(trees);
+      else set({ trees });
+    },
 
     loadGame: (saved, options = {}) => {
       nodeCounter = Math.max(
@@ -395,30 +583,42 @@ export const useGameStore = create<GameStore>((set, get) => {
         openingMovesUsed: saved.openingMovesUsed,
         consecutivePasses: 0,
         selectedNodeId: null,
+        noteEditorNodeId: null,
         focusedTreeId: null,
         isSharedView: options.shared ?? false,
+        ...(options.shared ? { currentTreeId: null } : {}),
       });
     },
 
     startGame: question => {
       const trimmed = question.trim();
       if (!trimmed) return fail('Enter a question to start the game');
-      nodeCounter = 0;
-      set({
-        ...initialState,
+      const state = get();
+      const id = newTreeId();
+      const game: SavedGame = {
+        ...snapshotGame(initialState),
         question: trimmed,
         gamePhase: 'opening',
         currentPlayer: 'agent',
+      };
+      nodeCounter = 0;
+      set({
+        ...initialState,
+        ...game,
         selectedNodeId: null,
+        noteEditorNodeId: null,
         focusedTreeId: null,
         isSharedView: false,
+        announcement: null,
+        trees: [...shelveCurrent(state), { id, game, updatedAt: Date.now() }],
+        currentTreeId: id,
       });
       return ok(`Game started: "${trimmed}". The agent opens`);
     },
 
     resetGame: () => {
-      nodeCounter = 0;
-      set({ ...initialState, selectedNodeId: null, focusedTreeId: null, isSharedView: false });
+      const { trees, currentTreeId } = get();
+      toSetup(currentTreeId === null ? trees : trees.filter(tree => tree.id !== currentTreeId));
     },
 
     joinGame: () => {
@@ -464,15 +664,27 @@ export const useGameStore = create<GameStore>((set, get) => {
         kind: 'root',
         ...(agentOpens ? { opening: true } : {}),
       });
-      set({
-        ...(starting ? { ...initialState, question: label, isSharedView: false } : {}),
+      const patch: Partial<GameState> = {
         nodes: [root],
         history: [...(starting ? [] : state.history), action],
         consecutivePasses: 0,
         gamePhase: agentOpens ? 'opening' : 'playing',
         currentPlayer: agentOpens ? 'agent' : otherPlayer(player),
-        selectedNodeId: null,
-      });
+      };
+      if (starting) {
+        // A game planted straight onto the empty board is a new tree in the index.
+        const id = newTreeId();
+        const game: GameState = { ...initialState, question: label, ...patch };
+        set({
+          ...game,
+          isSharedView: false,
+          selectedNodeId: null,
+          trees: [...shelveCurrent(state), { id, game: snapshotGame(game), updatedAt: Date.now() }],
+          currentTreeId: id,
+        });
+      } else {
+        set({ ...patch, selectedNodeId: null });
+      }
       return ok(
         agentOpens
           ? `Planted root "${label}". Grow up to ${OPENING_MOVES} opening branches, then pass`
@@ -565,12 +777,37 @@ export const useGameStore = create<GameStore>((set, get) => {
         action,
         state.nodes.map(n => {
           if (n.id !== nodeId) return n;
-          const flagged: TreeNode = { ...n, isGap: true, gapReason };
+          const flagged: TreeNode = { ...n, isGap: true, gapBy: player, gapReason };
           if (!gapReason) delete flagged.gapReason;
           return flagged;
         }),
       );
       return ok(`Marked "${node.label}" as a gap${gapReason ? `: ${gapReason}` : ''}${suffix}`);
+    },
+
+    // Free, so it never touches the turn: a change of mind should not cost
+    // the human a second move on top of the one being refunded.
+    unmarkGap: nodeId => {
+      const state = get();
+      const why = blocked(state, 'human');
+      if (why) return fail(why);
+
+      const node = state.nodes.find(n => n.id === nodeId);
+      if (!node) return fail('Node not found');
+      if (!node.isGap) return fail(`"${node.label}" is not a gap`);
+      if (node.gapBy !== 'human') {
+        return fail(
+          `Only a gap you marked yourself can be unmarked: branch a resource or skill under "${node.label}" to close it`,
+        );
+      }
+
+      const action = record('unmark_gap', 'human', false, { nodeId, label: node.label, kind: node.kind });
+      set({
+        nodes: state.nodes.map(n => (n.id === nodeId ? clearGap(n) : n)),
+        humanMoves: Math.min(MOVES_PER_PLAYER, state.humanMoves + 1),
+        history: [...state.history, action],
+      });
+      return ok(`Unmarked "${node.label}": the gap is cleared and your move is back`);
     },
 
     annotate: (nodeId, content, player) => {
@@ -589,12 +826,56 @@ export const useGameStore = create<GameStore>((set, get) => {
       if ('url' in parsed.value) changes.push(parsed.value.url ? 'url' : 'cleared url');
       if (changes.length === 0) return fail('Provide a note or a url to annotate');
 
-      const action = record('annotate', player, false, { nodeId, label: node.label, kind: node.kind });
       set({
         nodes: state.nodes.map(n => (n.id === nodeId ? withContent(n, parsed.value) : n)),
-        history: [...state.history, action],
+        history: withAnnotation(state, player, node),
       });
       return ok(`Updated ${changes.join(' and ')} on "${node.label}"`);
+    },
+
+    editNote: (nodeId, edit, player) => {
+      const state = get();
+      const why = blocked(state, player);
+      if (why) return fail(why);
+
+      const node = state.nodes.find(n => n.id === nodeId);
+      if (!node) return fail('Node not found');
+
+      const current = node.note ?? '';
+      let next: string;
+      let did: string;
+      if (edit.mode === 'append') {
+        const text = edit.text.trim();
+        if (!text) return fail('Provide the text to append');
+        next = current ? `${current}\n\n${text}` : text;
+        did = 'Appended to';
+      } else {
+        const { find } = edit;
+        if (!find.trim()) return fail('Provide the passage to replace in find');
+        const matches = current.split(find).length - 1;
+        if (matches === 0) {
+          return fail(
+            `"${excerpt(find)}" is not in the note on "${node.label}": read the note with get_node_state and quote a passage from it exactly`,
+          );
+        }
+        if (matches > 1) {
+          return fail(
+            `"${excerpt(find)}" appears ${matches} times in the note on "${node.label}": quote more of the passage so it matches once`,
+          );
+        }
+        // A replacer function keeps "$&" and friends in the text literal.
+        next = current.replace(find, () => edit.text);
+        did = edit.text.trim() ? 'Edited' : 'Cut a passage from';
+      }
+
+      const parsed = parseContent({ note: next });
+      if (parsed.error) return fail(parsed.error);
+
+      set({
+        nodes: state.nodes.map(n => (n.id === nodeId ? withContent(n, parsed.value) : n)),
+        history: withAnnotation(state, player, node),
+      });
+      return ok(`${did} the note on "${node.label}": it is now ${parsed.value.note?.length ?? 0} characters`, nodeId);
     },
 
     passTurn: player => {
@@ -669,12 +950,16 @@ export const useGameStore = create<GameStore>((set, get) => {
 
     openFromForest: treeId => {
       const state = get();
-      if (state.gamePhase === 'opening' || state.gamePhase === 'playing') {
-        return fail('Finish or reset the current game before revisiting a planted tree');
-      }
       const tree = state.grove.find(t => t.id === treeId);
       if (!tree) return fail('That tree is no longer in the forest');
-      get().loadGame({
+      // The game the tree was grown in is usually still in the index, with its
+      // history and its share link; switching to it keeps all of that.
+      const played = state.trees.find(
+        entry => entry.game.gamePhase === 'ended' && sameNodes(entry.game.nodes, tree.nodes),
+      );
+      if (played) return get().switchTree(played.id);
+      const id = newTreeId();
+      const game: SavedGame = {
         question: tree.question,
         nodes: tree.nodes,
         humanMoves: 0,
@@ -683,7 +968,8 @@ export const useGameStore = create<GameStore>((set, get) => {
         gamePhase: 'ended',
         history: [],
         openingMovesUsed: 0,
-      });
+      };
+      bringUp(id, game, [...shelveCurrent(state), { id, game, updatedAt: tree.plantedAt }]);
       return ok(`Revisiting "${tree.question}"`);
     },
 

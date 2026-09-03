@@ -1,10 +1,13 @@
-import { PERSIST_DEBOUNCE_MS, useGameStore } from './store';
-import type { GameAction, PlantedTree, SavedGame, TreeNode } from './types';
+import { PERSIST_DEBOUNCE_MS, newTreeId, shelveCurrent, snapshotGame, useGameStore } from './store';
+import type { GameAction, IndexedTree, PlantedTree, SavedGame, TreeNode } from './types';
 
 export const STORAGE_KEY = 'canvasquest:game';
 
 /** The forest's planted trees, kept apart from the game so a reset never fells them. */
 export const GROVE_KEY = 'canvasquest:grove';
+
+/** The question index: every tree the human can switch to, and which one is on the board. */
+export const TREES_KEY = 'canvasquest:trees';
 
 /** The URL fragment that carries a shared board, e.g. "#game=eyJ...". */
 const HASH_PREFIX = '#game=';
@@ -12,7 +15,7 @@ const HASH_PREFIX = '#game=';
 const KINDS: readonly string[] = ['root', 'concept', 'resource', 'skill'];
 const PLAYERS: readonly string[] = ['human', 'agent'];
 const PHASES: readonly string[] = ['setup', 'opening', 'playing', 'ended'];
-const ACTIONS: readonly string[] = ['plant', 'branch', 'prune', 'mark_gap', 'annotate'];
+const ACTIONS: readonly string[] = ['plant', 'branch', 'prune', 'mark_gap', 'unmark_gap', 'annotate'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
@@ -29,6 +32,7 @@ function isTreeNode(value: unknown): value is TreeNode {
     PLAYERS.includes(value.createdBy as string) &&
     typeof value.isGap === 'boolean' &&
     optionalString(value.gapReason) &&
+    (value.gapBy === undefined || PLAYERS.includes(value.gapBy as string)) &&
     optionalString(value.note) &&
     optionalString(value.url)
   );
@@ -73,20 +77,6 @@ const withDefaults = (value: Record<string, unknown>): Record<string, unknown> =
   ...value,
   openingMovesUsed: value.openingMovesUsed ?? 0,
 });
-
-/** Picks the persisted fields out of the store state. */
-export function snapshotGame(state: SavedGame): SavedGame {
-  return {
-    question: state.question,
-    nodes: state.nodes,
-    humanMoves: state.humanMoves,
-    agentMoves: state.agentMoves,
-    currentPlayer: state.currentPlayer,
-    gamePhase: state.gamePhase,
-    history: state.history,
-    openingMovesUsed: state.openingMovesUsed,
-  };
-}
 
 // ---------------------------------------------------------------------------
 // localStorage
@@ -162,11 +152,60 @@ export function restoreGrove(): void {
   if (grove.length > 0) useGameStore.getState().setGrove(grove);
 }
 
+// ---------------------------------------------------------------------------
+// The question index: every tree, and which one is on the board
+// ---------------------------------------------------------------------------
+
+interface StoredIndex {
+  currentTreeId: string | null;
+  trees: IndexedTree[];
+}
+
+/**
+ * The index entry the saved game belongs to, remembered across a shared view:
+ * a share link puts a foreign board up without touching the viewer's own game,
+ * and the pointer to it must not be lost while the link is open.
+ */
+let indexPointer: string | null = null;
+
+export function loadIndex(): StoredIndex {
+  const empty: StoredIndex = { currentTreeId: null, trees: [] };
+  try {
+    const raw = localStorage.getItem(TREES_KEY);
+    if (!raw) return empty;
+    const parsed: unknown = JSON.parse(raw);
+    if (!isRecord(parsed) || !Array.isArray(parsed.trees)) return empty;
+    const trees: IndexedTree[] = [];
+    const seen = new Set<string>();
+    for (const item of parsed.trees as unknown[]) {
+      if (!isRecord(item) || typeof item.id !== 'string' || seen.has(item.id)) continue;
+      if (!Number.isFinite(item.updatedAt) || !isRecord(item.game)) continue;
+      const game = withDefaults(item.game);
+      if (!isSavedGame(game) || game.gamePhase === 'setup') continue;
+      seen.add(item.id);
+      trees.push({ id: item.id, game, updatedAt: item.updatedAt as number });
+    }
+    const pointer = parsed.currentTreeId;
+    return { currentTreeId: typeof pointer === 'string' && seen.has(pointer) ? pointer : null, trees };
+  } catch {
+    return empty;
+  }
+}
+
+function writeIndex(index: StoredIndex): void {
+  try {
+    localStorage.setItem(TREES_KEY, JSON.stringify(index));
+  } catch {
+    // See clearSavedGame.
+  }
+}
+
 /**
  * Autosaves the game whenever it changes, debounced. A board that came from a
  * share link is never saved over the viewer's own game, and returning to setup
  * (reset or new game) clears both the save and the share fragment. The grove
- * is saved whenever a tree is planted or felled, whatever board is open.
+ * is saved whenever a tree is planted or felled, and the question index with
+ * the board written back into its entry, whatever board is open.
  */
 export function startAutosave(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -179,6 +218,8 @@ export function startAutosave(): () => void {
         savedGrove = state.grove;
         writeGrove(state.grove);
       }
+      if (!state.isSharedView) indexPointer = state.currentTreeId;
+      writeIndex({ currentTreeId: indexPointer, trees: shelveCurrent(state) });
       if (state.isSharedView) return;
       if (state.gamePhase === 'setup') {
         clearSavedGame();
@@ -259,29 +300,55 @@ export function readShareHash(): SavedGame | null {
   }
 }
 
-/**
- * Restores the forest, then a shared board from the URL, else the autosaved
- * game. Runs once before the first render so nothing flashes.
- */
 const sameBoard = (a: SavedGame, b: SavedGame) =>
   a.question === b.question && JSON.stringify(a.nodes) === JSON.stringify(b.nodes);
 
+/**
+ * The question index with the autosaved game in it. A game saved before the
+ * index existed, or whose entry went missing, is given one; a game whose save
+ * went missing comes back from its entry.
+ */
+function restoreIndex(saved: SavedGame | null): { active: SavedGame | null; currentTreeId: string | null } {
+  const index = loadIndex();
+  let { trees } = index;
+  const pointed = index.currentTreeId === null ? undefined : trees.find(t => t.id === index.currentTreeId);
+  const active = saved && saved.gamePhase !== 'setup' ? saved : (pointed?.game ?? null);
+  let currentTreeId: string | null = null;
+  if (active) {
+    const entry =
+      pointed ?? trees.find(t => t.game.gamePhase === active.gamePhase && sameBoard(t.game, active));
+    if (entry) currentTreeId = entry.id;
+    else {
+      currentTreeId = newTreeId();
+      trees = [...trees, { id: currentTreeId, game: active, updatedAt: Date.now() }];
+    }
+  }
+  indexPointer = currentTreeId;
+  useGameStore.getState().setTrees(trees, currentTreeId);
+  return { active, currentTreeId };
+}
+
+/**
+ * Restores the forest and the question index, then a shared board from the
+ * URL, else the autosaved game. Runs once before the first render so nothing
+ * flashes.
+ */
 export function restoreGame(): 'shared' | 'saved' | 'none' {
   restoreGrove();
   const shared = readShareHash();
-  const saved = loadSavedGame();
+  const { active } = restoreIndex(loadSavedGame());
   if (shared) {
     // Reloading one's own finished game: the address bar already carries the
     // share hash, but the local save has the history and stays editable.
-    if (saved && saved.gamePhase === 'ended' && sameBoard(saved, shared)) {
-      useGameStore.getState().loadGame(saved);
+    if (active && active.gamePhase === 'ended' && sameBoard(active, shared)) {
+      useGameStore.getState().loadGame(active);
       return 'saved';
     }
     useGameStore.getState().loadGame(shared, { shared: true });
     return 'shared';
   }
-  if (saved && saved.gamePhase !== 'setup') {
-    useGameStore.getState().loadGame(saved);
+  if (active) {
+    useGameStore.getState().loadGame(active);
     return 'saved';
   }
   return 'none';

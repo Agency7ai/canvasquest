@@ -1,36 +1,32 @@
-import { PLAYER_EMOJI, headingStyle, sectionStyle } from './panel';
 import { describeAction } from './store';
-import type { GameAction } from './types';
+import type { GameAction, PlayerType } from './types';
 
-/** How many history entries the list shows. */
 const HISTORY_ROWS = 8;
 
-/** The last few moves, newest first, numbered from the whole history. */
-export default function MoveHistory({ history, emptyText }: { history: GameAction[]; emptyText: string }) {
+const PLAYER_NAME: Record<PlayerType, string> = { human: 'You', agent: 'Agent' };
+
+interface Props {
+  history: GameAction[];
+  emptyText: string;
+}
+
+/** The last few actions, newest first, numbered from the whole history. */
+export default function MoveHistory({ history, emptyText }: Props) {
   const recent = history.slice(-HISTORY_ROWS).reverse();
+
   return (
-    <section style={sectionStyle}>
-      <div style={headingStyle}>Recent moves</div>
+    <section className="panel">
+      <span className="label">Recent actions</span>
       {recent.length === 0 ? (
-        <div style={{ fontSize: '12px', color: '#94a3b8' }}>{emptyText}</div>
+        <p className="muted" style={{ margin: 0 }}>
+          {emptyText}
+        </p>
       ) : (
-        <ol
-          reversed
-          start={history.length}
-          style={{
-            margin: 0,
-            paddingLeft: '22px',
-            maxHeight: '170px',
-            overflowY: 'auto',
-            fontSize: '12px',
-            color: '#334155',
-            lineHeight: 1.6,
-          }}
-        >
+        <ol className="history" reversed start={history.length}>
           {recent.map((action, index) => (
             <li key={`${action.timestamp}-${index}`}>
-              {PLAYER_EMOJI[action.player]} {describeAction(action)}
-              {action.costsMove ? '' : <span style={{ color: '#94a3b8' }}> (free)</span>}
+              <span className="history-player">{PLAYER_NAME[action.player]}</span> {describeAction(action)}
+              {!action.costsMove && <span className="muted"> (free)</span>}
             </li>
           ))}
         </ol>

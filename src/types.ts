@@ -12,6 +12,18 @@ export type GamePhase = 'setup' | 'opening' | 'playing' | 'ended';
 /** How the board is shown: the living forest, or the flat, labelled board. */
 export type Visualization = 'forest' | 'board';
 
+/** A line the agent asked the page to show and read aloud. Transient: never saved. */
+export interface Announcement {
+  /** Counts up across games, so repeating the same words still reads as new. */
+  id: number;
+  /** What the agent is doing, in its own words. */
+  summary: string;
+  /** The "your turn" line, present when the agent is handing the board over. */
+  handoff?: string;
+  /** Epoch milliseconds. */
+  at: number;
+}
+
 export interface TreeNode {
   id: string;
   label: string;
@@ -22,6 +34,9 @@ export interface TreeNode {
   isGap: boolean;
   /** The challenge behind the gap, e.g. "How would you practise this?" */
   gapReason?: string;
+  /** Who marked the gap. Only the human can unmark one, and only their own. */
+  gapBy?: PlayerType;
+  /** Markdown; the side panel shows its first line and the editor the whole document. */
   note?: string;
   url?: string;
 }
@@ -32,7 +47,15 @@ export interface NodeContent {
   url?: string;
 }
 
-export type ActionType = 'plant' | 'branch' | 'prune' | 'mark_gap' | 'annotate';
+/**
+ * A change to a node's note that keeps the rest of it: text added at the end,
+ * or one passage swapped for another. How the agent co-writes with the human.
+ */
+export type NoteEdit =
+  | { mode: 'append'; text: string }
+  | { mode: 'replace'; find: string; text: string };
+
+export type ActionType = 'plant' | 'branch' | 'prune' | 'mark_gap' | 'unmark_gap' | 'annotate';
 
 export interface GameAction {
   type: ActionType;
@@ -77,6 +100,17 @@ export interface SavedGame {
   gamePhase: GamePhase;
   history: GameAction[];
   openingMovesUsed: number;
+}
+
+/**
+ * A tree in the question index: a whole game, parked while another is on the
+ * board or being played right now. Switching trees swaps one in for another.
+ */
+export interface IndexedTree {
+  id: string;
+  game: SavedGame;
+  /** Epoch milliseconds of the last change to the game. */
+  updatedAt: number;
 }
 
 /** A finished board standing in the forest. */

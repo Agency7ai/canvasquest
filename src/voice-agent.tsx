@@ -7,12 +7,40 @@ import {
 import { applyMove, readBoard } from './moves';
 import type { BoardSummary, MoveName } from './moves';
 import { OPENING_MOVES, describeAction, useGameStore } from './store';
-import type { GamePhase } from './types';
+import type { GamePhase, TreeNode } from './types';
 
 const AGENT_ID = import.meta.env.VITE_ELEVENLABS_AGENT_ID ?? '';
 
 /** How many of the agent's recent actions the panel lists. */
 const LOG_ROWS = 5;
+
+/** How long after the human stops editing a note the agent hears about it. */
+const NOTE_UPDATE_MS = 1500;
+
+const NODE_FIELDS_APART_FROM_NOTE: Array<keyof TreeNode> = [
+  'id',
+  'label',
+  'kind',
+  'parentId',
+  'createdBy',
+  'isGap',
+  'gapReason',
+  'gapBy',
+  'url',
+];
+
+/** The nodes whose note changed, when notes are all that changed on the board. */
+function editedNotes(before: TreeNode[], after: TreeNode[]): TreeNode[] {
+  if (before.length !== after.length) return [];
+  const edited: TreeNode[] = [];
+  for (let i = 0; i < after.length; i += 1) {
+    const was = before[i];
+    const now = after[i];
+    if (NODE_FIELDS_APART_FROM_NOTE.some(key => was[key] !== now[key])) return [];
+    if (was.note !== now.note) edited.push(now);
+  }
+  return edited;
+}
 
 /** What the agent should do next, given where the game is. */
 function instructions(board: BoardSummary): string {
@@ -92,7 +120,9 @@ export default function VoiceAgent() {
     // board watcher below must not narrate it a second time.
     const result = applyMove(name, params ?? {});
     const readOnly = name === 'get_board' || name === 'get_node_state';
-    isAgentActingRef.current = result.success && !readOnly;
+    // An announcement changes nothing on the board, so it leaves no change of
+    // the agent's own for the watcher to skip.
+    isAgentActingRef.current = result.success && !readOnly && name !== 'announce';
 
     // Successful moves show up in the shared history; only failures need a
     // line of their own here.
@@ -112,19 +142,29 @@ export default function VoiceAgent() {
     const initial = useGameStore.getState();
     let previous = {
       moves: initial.history.length,
+      nodes: initial.nodes,
       player: initial.currentPlayer,
       phase: initial.gamePhase,
     };
     let debounce: ReturnType<typeof setTimeout> | undefined;
 
     const unsubscribe = useGameStore.subscribe(state => {
-      const boardChanged = state.history.length !== previous.moves;
+      // A run of note edits shares one history entry, so the nodes themselves
+      // are watched too: a note being written changes nothing else.
+      const boardChanged = state.history.length !== previous.moves || state.nodes !== previous.nodes;
       const turnChanged = state.currentPlayer !== previous.player;
       const phaseChanged = state.gamePhase !== previous.phase;
       if (!boardChanged && !turnChanged && !phaseChanged) return;
       const from = previous.phase;
+      // The editor saves as the human types, so a note arrives as a stream of
+      // small changes. Those get a lighter word, later, without the board.
+      const edited =
+        turnChanged || phaseChanged || state.history.length < previous.moves
+          ? []
+          : editedNotes(previous.nodes, state.nodes);
       previous = {
         moves: state.history.length,
+        nodes: state.nodes,
         player: state.currentPlayer,
         phase: state.gamePhase,
       };
@@ -136,13 +176,20 @@ export default function VoiceAgent() {
 
       clearTimeout(debounce);
       debounce = setTimeout(() => {
+        if (edited.length > 0) {
+          const where = edited.map(node => `"${node.label}" (${node.id})`).join(' and ');
+          controls.sendContextualUpdate(
+            `The human edited the note on ${where}. Call get_node_state to read it before writing there yourself.`,
+          );
+          return;
+        }
         const board = readBoard();
         controls.sendContextualUpdate(
           [describeChange(board, from, boardChanged), `The board is now ${JSON.stringify(board)}.`, instructions(board)]
             .filter(Boolean)
             .join(' '),
         );
-      }, 250);
+      }, edited.length > 0 ? NOTE_UPDATE_MS : 250);
     });
 
     return () => {
@@ -158,7 +205,9 @@ export default function VoiceAgent() {
   useConversationClientTool('prune', (params: Record<string, unknown>) => runMove('prune', params));
   useConversationClientTool('mark_gap', (params: Record<string, unknown>) => runMove('mark_gap', params));
   useConversationClientTool('annotate', (params: Record<string, unknown>) => runMove('annotate', params));
+  useConversationClientTool('edit_note', (params: Record<string, unknown>) => runMove('edit_note', params));
   useConversationClientTool('pass', () => runMove('pass', {}));
+  useConversationClientTool('announce', (params: Record<string, unknown>) => runMove('announce', params));
 
   const handleConnect = useCallback(async () => {
     setError(null);
@@ -260,7 +309,7 @@ export default function VoiceAgent() {
                 VITE_ELEVENLABS_AGENT_ID
               </code>{' '}
               in <code style={{ background: '#f1f5f9', padding: '1px 4px', borderRadius: '3px' }}>.env</code>{' '}
-              to let a voice agent play. See the README for the eight client tools to add to your agent.
+              to let a voice agent play. See the README for the ten client tools to add to your agent.
             </p>
           ) : (
             <button

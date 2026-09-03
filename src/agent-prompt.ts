@@ -19,5 +19,6 @@ export function buildAgentPrompt(topic: string): string {
     open,
     `Then grow up to ${OPENING_MOVES} opening branches on your own, one branch per call, and call pass to hand the board to me.`,
     `After that we alternate with ${MOVES_PER_PLAYER} moves each: make exactly one move on your turn, call get_board to see what I did, and mark a gap when you cannot fill a branch yourself.`,
+    'Call announce with a one-sentence summary of each move you make, and add a handoff line whenever you hand the board to me so the page can tell me it is my turn.',
   ].join(' ');
 }

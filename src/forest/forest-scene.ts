@@ -47,9 +47,9 @@ export interface ForestScene {
   dispose: () => void;
 }
 
-const BACKGROUND = '#0d1b1e';
-const GROUND = '#1d2f27';
-const CLEARING = '#24392d';
+const BACKGROUND = '#0f1f17';
+const GROUND = '#1b2e22';
+const CLEARING = '#23392a';
 const BARK = '#6b4f3a';
 const BARK_BARE = '#8a8377';
 const FOLIAGE: Record<LimbKind, string> = {
@@ -60,7 +60,7 @@ const FOLIAGE: Record<LimbKind, string> = {
   gap: '#b6b09c',
 };
 const SELECTION = '#fff1bd';
-const FADED = new THREE.Color('#12262a');
+const FADED = new THREE.Color('#132419');
 
 /** Tube resolution per limb: enough to curve, cheap enough for a full grove. */
 const TUBULAR = 10;

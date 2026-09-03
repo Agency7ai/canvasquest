@@ -1,17 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
 import MoveHistory from './move-history';
-import {
-  KIND_EMOJI,
-  asideStyle,
-  button,
-  darkSectionStyle,
-  feedbackStyle,
-  footnoteStyle,
-  headingStyle,
-  inputStyle,
-  sectionStyle,
-  twoColumns,
-} from './panel';
 import { computeScore } from './scoring';
 import { AUTO_SKIP_MS, IDLE_PASS_MS, MOVES_PER_PLAYER, type MoveOutcome, useGameStore } from './store';
 import type { NodeContent, NodeKind, TreeNode } from './types';
@@ -40,98 +28,99 @@ function IdlePassTimer({ onExpire }: { onExpire: () => void }) {
   }, [deadline, onExpire]);
 
   return (
-    <div style={{ fontSize: '12px', color: '#92400e', background: '#fef3c7', padding: '8px', borderRadius: '6px' }}>
-      ⏱ Idle: the agent takes over in {secondsLeft}s. Any edit resets the clock.
-    </div>
+    <p className="feedback feedback-amber">
+      Idle: the agent takes over in {secondsLeft}s. Any edit resets the clock.
+    </p>
   );
 }
 
-/** Details of the selected node plus the free note / URL form. */
+/** How much of a note the side panel shows before pointing at the editor. */
+const NOTE_PREVIEW_CHARS = 140;
+
+/** The first line of a note without its Markdown dressing, plus how much more there is. */
+function notePreview(note: string): string {
+  const lines = note.split('\n').filter(line => line.trim());
+  const first = lines[0]?.replace(/^[\s#>*\-+]+|[*_`]/g, '').trim() ?? '';
+  const clipped = first.length > NOTE_PREVIEW_CHARS ? `${first.slice(0, NOTE_PREVIEW_CHARS)}…` : first;
+  const more = lines.length - 1;
+  return more > 0 ? `${clipped} (+${more} more ${more === 1 ? 'line' : 'lines'})` : clipped;
+}
+
+/** Details of the selected node, the way into its Markdown note, and the free URL form. */
 function SelectedNodeCard({
   node,
   onAnnotate,
+  onOpenNote,
   onClose,
 }: {
   node: TreeNode;
   onAnnotate: (content: NodeContent) => void;
+  onOpenNote: () => void;
   onClose: () => void;
 }) {
-  const [note, setNote] = useState(node.note ?? '');
   const [url, setUrl] = useState(node.url ?? '');
-  const dirty = note !== (node.note ?? '') || url !== (node.url ?? '');
+  const dirty = url !== (node.url ?? '');
 
   return (
-    <section style={{ ...sectionStyle, borderColor: '#0f172a' }}>
+    <section className="panel panel-selected">
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-        <span style={{ fontSize: '18px' }}>{KIND_EMOJI[node.kind]}</span>
-        <div style={{ flex: 1, fontWeight: 600, fontSize: '14px', color: '#0f172a', wordBreak: 'break-word' }}>
+        <span className="tag">{node.kind}</span>
+        <div className="question-line" style={{ flex: 1 }}>
           {node.label}
         </div>
-        <code style={{ fontSize: '11px', background: '#f1f5f9', padding: '2px 6px', borderRadius: '4px' }}>{node.id}</code>
-        <button
-          type="button"
-          onClick={onClose}
-          aria-label="Clear selection"
-          style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#64748b', fontSize: '14px' }}
-        >
+        <code className="code">{node.id}</code>
+        <button type="button" className="icon-btn" onClick={onClose} aria-label="Clear selection">
           ✕
         </button>
       </div>
-      <div style={{ fontSize: '12px', color: '#64748b' }}>
+      <div className="muted">
         {node.kind} · created by {node.createdBy}
       </div>
       {node.isGap && (
-        <div style={{ fontSize: '12px', color: '#b91c1c', fontWeight: 600 }}>
-          ❓ Gap{node.gapReason ? `: ${node.gapReason}` : ''}
+        <div className="gap-line">
+          Gap{node.gapBy ? ` marked by the ${node.gapBy}` : ''}
+          {node.gapReason ? `: ${node.gapReason}` : ''}
         </div>
       )}
       {node.url && (
-        <a
-          href={node.url}
-          target="_blank"
-          rel="noreferrer"
-          style={{ fontSize: '12px', color: '#4f46e5', wordBreak: 'break-all' }}
-        >
-          🔗 {node.url}
+        <a className="link" href={node.url} target="_blank" rel="noreferrer">
+          {node.url}
         </a>
       )}
+
+      <span className="label">Note</span>
+      <p className="copy" style={{ overflowWrap: 'anywhere' }}>
+        {node.note ? notePreview(node.note) : 'No note yet.'}
+      </p>
+      <button
+        type="button"
+        className="btn btn-dark"
+        onClick={onOpenNote}
+        title="Opens the note full screen: Markdown with a live preview. Notes are free"
+      >
+        View markdown
+      </button>
 
       <form
         onSubmit={event => {
           event.preventDefault();
-          onAnnotate({ note, url });
+          onAnnotate({ url });
         }}
         style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}
       >
-        <label htmlFor="node-note" style={headingStyle}>
-          Note
-        </label>
-        <textarea
-          id="node-note"
-          rows={2}
-          value={note}
-          onChange={event => setNote(event.target.value)}
-          placeholder="Why this matters, what to look for…"
-          style={{ ...inputStyle, resize: 'vertical' }}
-        />
-        <label htmlFor="node-url" style={headingStyle}>
+        <label htmlFor="node-url" className="label">
           URL
         </label>
         <input
           id="node-url"
           type="text"
+          className="input"
           value={url}
           onChange={event => setUrl(event.target.value)}
           placeholder="https://…"
-          style={inputStyle}
         />
-        <button
-          type="submit"
-          disabled={!dirty}
-          title="Notes and links are free: they never cost a move"
-          style={{ ...button(dirty ? '#0f172a' : '#94a3b8'), cursor: dirty ? 'pointer' : 'default' }}
-        >
-          Save note / URL (free)
+        <button type="submit" className="btn btn-ghost" disabled={!dirty} title="Links are free: they never cost a move">
+          Save URL (free)
         </button>
       </form>
     </section>
@@ -153,12 +142,14 @@ export default function GameControls() {
     branch,
     prune,
     markGap,
+    unmarkGap,
     annotate,
     undoLastMove,
     passTurn,
     skipAgentTurn,
     resetGame,
     selectNode,
+    openNoteEditor,
   } = useGameStore();
 
   const [newLabel, setNewLabel] = useState('');
@@ -220,30 +211,46 @@ export default function GameControls() {
     if (target) act(markGap(target.id, 'human', gapReason));
   };
 
+  const handleUnmarkGap = () => {
+    const target = requireSelection();
+    if (target) act(unmarkGap(target.id));
+  };
+
+  // Only the gaps the human marked can be taken back; the agent's must be filled.
+  const canUnmark = selected?.isGap === true && selected.gapBy === 'human';
+
   const handleReset = () => {
-    if (window.confirm('Reset the game? The board and the saved progress will be cleared.')) {
+    if (
+      window.confirm(
+        'Reset this tree? It leaves the question index and the board is cleared. The forest keeps any finished tree.',
+      )
+    ) {
       resetGame();
     }
   };
 
   return (
-    <aside style={asideStyle}>
-      <section style={darkSectionStyle}>
-        <div style={{ fontSize: '11px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Question</div>
-        <div style={{ fontWeight: 600, fontSize: '14px', marginTop: '2px', lineHeight: 1.3 }}>{question}</div>
-        <div style={{ marginTop: '10px' }}>
-          Human: {humanMoves} moves · Agent: {agentMoves} moves
-        </div>
-        <div style={{ marginTop: '4px' }}>Turn: {isHumanTurn ? '🧑 Human' : '🤖 Agent'}</div>
-        <div style={{ marginTop: '4px' }}>
-          Score: {score.total}/100 · Open gaps: {score.openGaps.length}
+    <aside className="aside">
+      <section className="panel panel-dark">
+        <span className="label">Question</span>
+        <div className="question-line">{question}</div>
+        <div className="stats">
+          <div className="stat">
+            Human: {humanMoves} moves · Agent: {agentMoves} moves
+          </div>
+          <div className="stat">
+            Turn: <strong>{isHumanTurn ? 'Human' : 'Agent'}</strong>
+          </div>
+          <div className="stat">
+            Score: {score.total}/100 · Open gaps: {score.openGaps.length}
+          </div>
         </div>
       </section>
 
       {feedback && (
-        <div role="status" style={feedbackStyle}>
+        <p role="status" className="feedback">
           {feedback}
-        </div>
+        </p>
       )}
 
       {selected && (
@@ -251,13 +258,14 @@ export default function GameControls() {
           key={`${selected.id}|${selected.note ?? ''}|${selected.url ?? ''}`}
           node={selected}
           onAnnotate={content => act(annotate(selected.id, content, 'human'))}
+          onOpenNote={() => openNoteEditor(selected.id)}
           onClose={() => selectNode(null)}
         />
       )}
 
       {isHumanTurn ? (
-        <section style={sectionStyle}>
-          <div style={headingStyle}>Your move</div>
+        <section className="panel">
+          <span className="label">Move</span>
           {idleActive && (
             <IdlePassTimer
               key={activityKey}
@@ -271,85 +279,110 @@ export default function GameControls() {
           <input
             id="node-label"
             type="text"
+            className="input"
             value={newLabel}
             onChange={event => setNewLabel(event.target.value)}
             placeholder={nodes.length === 0 ? 'Root label (defaults to the question)' : 'New node label'}
-            style={inputStyle}
           />
 
           {nodes.length === 0 ? (
             <button
+              type="button"
+              className="btn btn-primary"
               onClick={() => act(plant(newLabel.trim() || question, 'human'))}
-              style={button('#6366f1')}
               title="Free: planting never costs a move"
             >
-              🌱 Plant root (free)
+              Plant root (free)
             </button>
           ) : (
             <>
               <select
                 id="target-node"
+                className="input"
                 value={selectedNodeId ?? ''}
                 onChange={event => selectNode(event.target.value || null)}
-                style={inputStyle}
               >
                 <option value="">Target: click a node or choose one…</option>
                 {nodes.map(node => (
                   <option key={node.id} value={node.id}>
-                    {node.id} · {KIND_EMOJI[node.kind]} {node.label}
-                    {node.isGap ? ' ❓' : ''}
+                    {node.id} · {node.kind} · {node.label}
+                    {node.isGap ? ' · gap' : ''}
                   </option>
                 ))}
               </select>
-              <div style={twoColumns}>
+              <div className="two-columns">
                 <select
                   id="node-kind"
+                  className="input"
                   value={newKind}
                   onChange={event => setNewKind(event.target.value as NodeKind)}
-                  style={inputStyle}
                 >
-                  <option value="concept">💡 Concept</option>
-                  <option value="resource">📚 Resource</option>
-                  <option value="skill">⚡ Skill</option>
+                  <option value="concept">Concept</option>
+                  <option value="resource">Resource</option>
+                  <option value="skill">Skill</option>
                 </select>
-                <button onClick={handleBranch} style={button('#10b981')} title="Adds the label under the target node">
-                  🌿 Branch
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleBranch}
+                  title="Adds the label under the target node"
+                >
+                  Branch
                 </button>
               </div>
-              <div style={twoColumns}>
-                <button onClick={handlePrune} style={button('#ef4444')} title="Removes the target node and everything under it">
-                  ✂️ Prune
-                </button>
+              <div className="two-columns">
                 <button
-                  onClick={handleMarkGap}
-                  style={button('#f97316')}
-                  title="Flags the target node as a gap for the other player to fill"
+                  type="button"
+                  className="btn btn-danger"
+                  onClick={handlePrune}
+                  title="Removes the target node and everything under it"
                 >
-                  ❓ Mark gap
+                  Prune
                 </button>
+                {canUnmark ? (
+                  <button
+                    type="button"
+                    className="btn btn-primary"
+                    onClick={handleUnmarkGap}
+                    title="Free: clears the gap you marked and gives the move back"
+                  >
+                    Unmark gap
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn-warn"
+                    onClick={handleMarkGap}
+                    title="Flags the target node as a gap for the other player to fill"
+                  >
+                    Mark gap
+                  </button>
+                )}
               </div>
               <input
                 id="gap-reason"
                 type="text"
+                className="input"
                 value={gapReason}
                 onChange={event => setGapReason(event.target.value)}
                 placeholder="Gap reason (optional)"
-                style={inputStyle}
               />
             </>
           )}
 
-          <div style={twoColumns}>
+          <div className="two-columns">
             <button
+              type="button"
+              className="btn btn-ghost"
               onClick={() => act(undoLastMove())}
-              style={button('#64748b')}
               title="Reverts the agent's most recent action and refunds its move"
             >
               ↶ Undo agent
             </button>
             <button
+              type="button"
+              className="btn btn-dark"
               onClick={() => act(passTurn('human'))}
-              style={button('#0f172a')}
               title="Free. Two passes in a row end the game, so passing with no agent connected ends it"
             >
               Pass →
@@ -357,20 +390,26 @@ export default function GameControls() {
           </div>
         </section>
       ) : (
-        <section style={{ ...sectionStyle, background: '#fef3c7', borderColor: '#f59e0b' }}>
-          <div style={{ ...headingStyle, color: '#92400e' }}>🤖 Agent's turn</div>
-          <div style={{ fontSize: '13px', color: '#78350f', lineHeight: 1.4 }}>
+        <section className="panel panel-amber">
+          <span className="label">Agent&apos;s turn</span>
+          <p className="copy">
             {hasAgent
               ? 'Waiting for the agent to call a tool. Skip it if it stalls.'
               : `No agent is connected, so this turn is skipped in ${AUTO_SKIP_MS / 1000}s.`}
-          </div>
-          <div style={twoColumns}>
-            <button onClick={() => act(skipAgentTurn())} style={button('#f59e0b')} title="Counts as the agent passing">
-              Skip agent ⏭
+          </p>
+          <div className="two-columns">
+            <button
+              type="button"
+              className="btn btn-warn"
+              onClick={() => act(skipAgentTurn())}
+              title="Counts as the agent passing"
+            >
+              Skip agent
             </button>
             <button
+              type="button"
+              className="btn btn-ghost"
               onClick={() => act(undoLastMove())}
-              style={button('#64748b')}
               title="Reverts the agent's most recent action and refunds its move"
             >
               ↶ Undo agent
@@ -381,14 +420,14 @@ export default function GameControls() {
 
       <MoveHistory history={history} emptyText="No moves yet. Plant the root to begin." />
 
-      <button onClick={handleReset} style={{ ...button('white'), color: '#b91c1c', border: '1px solid #fecaca' }}>
-        Reset game
+      <button type="button" className="btn btn-danger-outline" onClick={handleReset}>
+        Reset tree
       </button>
 
-      <p style={footnoteStyle}>
+      <p className="footnote">
         Each player has {MOVES_PER_PLAYER} moves. Branching, pruning and marking gaps cost one; planting, passing,
         notes and links are free. Score comes from coverage, depth, a mix of kinds, shared authorship and content,
-        minus 5 per open gap. The finished tree is planted in your forest.
+        minus 5 per open gap. The finished tree is planted in your forest and stays in the question index.
       </p>
     </aside>
   );

@@ -42,7 +42,12 @@ export function gameToMarkdown(question: string, nodes: TreeNode[]): string {
     seen.add(node.id);
     const indent = '  '.repeat(depth);
     lines.push(`${indent}- [${node.kind}] ${node.label}`);
-    if (node.note) lines.push(`${indent}  - note: ${node.note}`);
+    if (node.note) {
+      // A Markdown note can run to many lines: they are nested under the bullet.
+      const [first = '', ...rest] = node.note.split('\n');
+      lines.push(`${indent}  - note: ${first}`);
+      for (const line of rest) lines.push(line.trim() ? `${indent}    ${line}` : '');
+    }
     if (node.url) lines.push(`${indent}  - link: [${node.url}](${node.url})`);
     if (node.isGap) lines.push(`${indent}  - ❓ gap: ${node.gapReason ?? 'open'}`);
     for (const child of children.get(node.id) ?? []) walk(child, depth + 1);

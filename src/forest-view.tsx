@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { CSSProperties } from 'react';
 import { ACTIVE_BOARD_ID } from './app-meta';
 import type { Board } from './forest/forest-layout';
 import { createForestScene } from './forest/forest-scene';
@@ -112,8 +111,9 @@ export default function ForestView() {
 
   const focused = focusedTreeId ? (boards.find(board => board.id === focusedTreeId) ?? null) : null;
   const standing = boards.filter(board => board.nodes.length > 0).length;
-  // A planted tree can only come back as the board between games.
-  const canRevisit = focused !== null && !focused.isActive && (gamePhase === 'setup' || gamePhase === 'ended');
+  // Any planted tree can come back onto the board; whatever is being played is
+  // parked in the question index first.
+  const canRevisit = focused !== null && !focused.isActive;
 
   const revisit = () => {
     if (!focused) return;
@@ -135,39 +135,39 @@ export default function ForestView() {
       : '';
 
   return (
-    <div style={{ position: 'relative', width: '100%', height: '100%', background: '#0d1b1e', overflow: 'hidden' }}>
-      <div ref={containerRef} style={{ position: 'absolute', inset: 0 }} />
+    <div className="forest">
+      <div ref={containerRef} className="forest-scene" />
 
       {unsupported && (
-        <div style={centerHintStyle}>
+        <div className="center-hint">
           This browser cannot draw the forest: WebGL is unavailable. The Board view shows the same tree.
         </div>
       )}
 
       {!unsupported && nodes.length === 0 && gamePhase !== 'setup' && (
-        <div style={centerHintStyle}>Bare ground. The sprout becomes a tree once the root is planted.</div>
+        <div className="center-hint">Bare ground. The sprout becomes a tree once the root is planted.</div>
       )}
 
-      <div style={overlayStyle}>
-        {caption && <p style={captionStyle}>{caption}</p>}
+      <div className="forest-overlay">
+        {caption && <p className="forest-caption">{caption}</p>}
 
         {focused && (
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button type="button" onClick={() => setFocusedTreeId(null)} style={pillStyle}>
+          <div className="pills">
+            <button type="button" className="pill" onClick={() => setFocusedTreeId(null)}>
               ← Back to the forest
             </button>
             {canRevisit && (
               <button
                 type="button"
+                className="pill pill-primary"
                 onClick={revisit}
-                title="Brings this tree back as the board, with its score and share link"
-                style={{ ...pillStyle, background: 'rgba(52, 121, 74, 0.85)' }}
+                title="Brings this tree onto the board; the tree being played is parked in the question index"
               >
                 Revisit this tree
               </button>
             )}
             {!focused.isActive && (
-              <button type="button" onClick={fell} title="Removes this tree from the forest" style={pillStyle}>
+              <button type="button" className="pill" onClick={fell} title="Removes this tree from the forest">
                 Fell it
               </button>
             )}
@@ -175,92 +175,19 @@ export default function ForestView() {
         )}
 
         {notice && (
-          <p role="status" style={{ ...captionStyle, color: '#bbf7d0', textTransform: 'none' }}>
+          <p role="status" className="forest-caption forest-notice">
             {notice}
           </p>
         )}
       </div>
 
       {hover && (
-        <div
-          style={{
-            position: 'absolute',
-            left: `${hover.x}px`,
-            top: `${hover.y}px`,
-            transform: 'translate(-50%, -170%)',
-            pointerEvents: 'none',
-            background: 'rgba(12, 26, 22, 0.9)',
-            border: '1px solid rgba(148, 163, 184, 0.35)',
-            borderRadius: '8px',
-            padding: '6px 10px',
-            color: '#ecfdf5',
-            fontSize: '12px',
-            whiteSpace: 'nowrap',
-            backdropFilter: 'blur(6px)',
-          }}
-        >
-          {hover.treeId === ACTIVE_BOARD_ID && <span style={{ opacity: 0.55, marginRight: '6px' }}>{hover.nodeId}</span>}
+        <div className="forest-tooltip" style={{ left: `${hover.x}px`, top: `${hover.y}px` }}>
+          {hover.treeId === ACTIVE_BOARD_ID && <span className="tooltip-id">{hover.nodeId}</span>}
           {hover.label}
-          {hover.kind === 'gap' && <span style={{ marginLeft: '6px', color: '#fca5a5' }}>· gap</span>}
+          {hover.kind === 'gap' && <span className="tooltip-gap">· gap</span>}
         </div>
       )}
-
-      <p style={footerStyle}>drag to look · scroll to walk closer · click a limb to select · double-click to step back</p>
     </div>
   );
 }
-
-const centerHintStyle: CSSProperties = {
-  position: 'absolute',
-  inset: 0,
-  display: 'grid',
-  placeItems: 'center',
-  pointerEvents: 'none',
-  color: '#94a3b8',
-  fontSize: '14px',
-  textAlign: 'center',
-  padding: '24px',
-};
-
-const overlayStyle: CSSProperties = {
-  position: 'absolute',
-  left: '16px',
-  top: '16px',
-  display: 'flex',
-  flexDirection: 'column',
-  gap: '8px',
-  alignItems: 'flex-start',
-  maxWidth: 'calc(100% - 32px)',
-};
-
-const captionStyle: CSSProperties = {
-  margin: 0,
-  color: 'rgba(226, 232, 240, 0.82)',
-  fontSize: '11px',
-  letterSpacing: '0.06em',
-  textTransform: 'uppercase',
-  pointerEvents: 'none',
-  textShadow: '0 1px 3px rgba(0,0,0,0.6)',
-};
-
-const pillStyle: CSSProperties = {
-  background: 'rgba(15, 30, 25, 0.78)',
-  color: '#e2e8f0',
-  border: '1px solid rgba(148, 163, 184, 0.4)',
-  borderRadius: '999px',
-  padding: '6px 14px',
-  fontSize: '12px',
-  fontWeight: 600,
-  cursor: 'pointer',
-  backdropFilter: 'blur(6px)',
-};
-
-const footerStyle: CSSProperties = {
-  position: 'absolute',
-  right: '16px',
-  bottom: '12px',
-  margin: 0,
-  color: 'rgba(148, 163, 184, 0.6)',
-  fontSize: '11px',
-  pointerEvents: 'none',
-};

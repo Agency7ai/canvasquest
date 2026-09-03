@@ -13,7 +13,6 @@ const kindColors: Record<NodeKind, { bg: string; border: string; text: string }>
   concept: { bg: '#10b981', border: '#059669', text: '#ffffff' },
   resource: { bg: '#f59e0b', border: '#d97706', text: '#ffffff' },
   skill: { bg: '#8b5cf6', border: '#7c3aed', text: '#ffffff' },
-  gap: { bg: '#ef4444', border: '#dc2626', text: '#ffffff' },
 };
 
 const kindLabels: Record<NodeKind, string> = {
@@ -21,19 +20,25 @@ const kindLabels: Record<NodeKind, string> = {
   concept: '💡',
   resource: '📚',
   skill: '⚡',
-  gap: '❓',
 };
+
+const GAP_COLOR = '#ef4444';
 
 function TreeNodeComponent({ data }: TreeNodeProps) {
   const { node } = data;
   const colors = kindColors[node.kind];
 
+  // A gap keeps the colour of its real kind; the red border and badge sit on top.
+  const border = node.isGap ? `3px dashed ${GAP_COLOR}` : `2px solid ${colors.border}`;
+
   return (
     <div
+      title={node.isGap ? `Gap${node.gapReason ? `: ${node.gapReason}` : ''}` : undefined}
       style={{
+        position: 'relative',
         padding: '12px 16px',
         borderRadius: '8px',
-        border: `2px solid ${colors.border}`,
+        border,
         background: colors.bg,
         color: colors.text,
         minWidth: '160px',
@@ -50,7 +55,30 @@ function TreeNodeComponent({ data }: TreeNodeProps) {
           style={{ background: colors.border }}
         />
       )}
-      
+
+      {node.isGap && (
+        <span
+          aria-label="Open gap"
+          style={{
+            position: 'absolute',
+            top: '-12px',
+            right: '-12px',
+            width: '26px',
+            height: '26px',
+            borderRadius: '50%',
+            background: GAP_COLOR,
+            color: 'white',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '15px',
+            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.25)',
+          }}
+        >
+          ❓
+        </span>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
         <span style={{ fontSize: '18px' }}>{kindLabels[node.kind]}</span>
         <div style={{ flex: 1, wordBreak: 'break-word' }}>

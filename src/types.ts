@@ -1,6 +1,8 @@
-export type NodeKind = 'root' | 'concept' | 'resource' | 'skill' | 'gap';
+export type NodeKind = 'root' | 'concept' | 'resource' | 'skill';
 
 export type PlayerType = 'human' | 'agent';
+
+export type GamePhase = 'setup' | 'playing' | 'ended';
 
 export interface TreeNode {
   id: string;
@@ -8,25 +10,45 @@ export interface TreeNode {
   kind: NodeKind;
   parentId: string | null;
   createdBy: PlayerType;
+  /** A gap is a flag laid over the node's real kind, never a kind of its own. */
+  isGap: boolean;
+  /** The challenge behind the gap, e.g. "How would you practise this?" */
+  gapReason?: string;
+  note?: string;
+  url?: string;
+}
+
+/** Optional content attached to a node. Empty strings clear a field. */
+export interface NodeContent {
+  note?: string;
+  url?: string;
+}
+
+export type ActionType = 'plant' | 'branch' | 'prune' | 'mark_gap' | 'mark_clear' | 'annotate';
+
+export interface GameAction {
+  type: ActionType;
+  player: PlayerType;
+  timestamp: number;
+  nodeId?: string;
+  parentId?: string;
+  /** Label of the node the action touched, for logs. */
+  label?: string;
+  kind?: NodeKind;
+  /** Whether the action consumed a move; undo refunds it if so. */
+  costsMove: boolean;
+  /** Every node as it was before the action, so undo is lossless. */
+  before: TreeNode[];
 }
 
 export interface GameState {
+  question: string;
+  gamePhase: GamePhase;
   nodes: TreeNode[];
   currentPlayer: PlayerType;
   movesRemaining: number;
   gameStatus: 'playing' | 'won' | 'lost';
-  question: string;
   history: GameAction[];
-}
-
-export interface GameAction {
-  type: 'plant' | 'branch' | 'prune' | 'mark_gap' | 'mark_clear' | 'undo';
-  nodeId?: string;
-  parentId?: string;
-  label?: string;
-  kind?: NodeKind;
-  player: PlayerType;
-  timestamp: number;
 }
 
 export interface WebMCPTool {

@@ -35,9 +35,9 @@ export default function GameCanvas() {
       source: n.parentId!,
       target: n.id,
       type: 'smoothstep',
-      animated: n.kind === 'gap',
+      animated: n.isGap,
       style: {
-        stroke: n.kind === 'gap' ? '#ef4444' : '#64748b',
+        stroke: n.isGap ? '#ef4444' : '#64748b',
         strokeWidth: 2,
       },
     }));

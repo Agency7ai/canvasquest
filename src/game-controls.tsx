@@ -6,8 +6,8 @@ import { hasWebMCP as detectWebMCP } from './use-webmcp';
 const IDLE_PASS_MS = 15000;
 
 export default function GameControls() {
-  const { nodes, currentPlayer, movesRemaining, gameStatus, question } = useGameStore();
-  const { plant, branch, prune, markGap, markClear, undoLastMove, passTurn, resetGame } = useGameStore();
+  const { nodes, currentPlayer, movesRemaining, gameStatus, gamePhase, question } = useGameStore();
+  const { plant, branch, prune, markGap, markClear, undoLastMove, passTurn, resetGame, startGame } = useGameStore();
   const hasWebMCP = detectWebMCP();
   const isVoiceConnected = useGameStore(state => state.isVoiceConnected);
 
@@ -15,6 +15,7 @@ export default function GameControls() {
   const [newLabel, setNewLabel] = useState('');
   const [newKind, setNewKind] = useState<NodeKind>('concept');
   const [feedback, setFeedback] = useState('');
+  const [questionDraft, setQuestionDraft] = useState('');
 
   const showFeedback = (message: string) => {
     setFeedback(message);
@@ -91,7 +92,13 @@ export default function GameControls() {
     showFeedback('Game reset');
   };
 
-  const gapCount = nodes.filter(n => n.kind === 'gap').length;
+  const handleStart = () => {
+    const result = startGame(questionDraft);
+    showFeedback(result.message);
+    if (result.success) setQuestionDraft('');
+  };
+
+  const gapCount = nodes.filter(n => n.isGap).length;
   const isWinnable = nodes.length >= 5 && gapCount === 0;
 
   const handleSkipAgent = () => {
@@ -103,10 +110,10 @@ export default function GameControls() {
   // hand the turn straight back. A live agent keeps its turn.
   const hasAgent = hasWebMCP || isVoiceConnected;
   useEffect(() => {
-    if (hasAgent || currentPlayer !== 'agent' || gameStatus !== 'playing') return;
+    if (hasAgent || currentPlayer !== 'agent' || gamePhase !== 'playing') return;
     const timer = setTimeout(handleSkipAgent, 1000);
     return () => clearTimeout(timer);
-  }, [hasAgent, currentPlayer, gameStatus]);
+  }, [hasAgent, currentPlayer, gamePhase]);
 
   const handlePass = () => {
     const result = passTurn();
@@ -116,13 +123,13 @@ export default function GameControls() {
   // A quiet human should not stall the board. After a spell of inactivity the
   // turn goes to the agent on its own, which is how it ends up playing twice.
   useEffect(() => {
-    if (!isVoiceConnected || currentPlayer !== 'human' || gameStatus !== 'playing') return;
+    if (!isVoiceConnected || currentPlayer !== 'human' || gamePhase !== 'playing') return;
     const timer = setTimeout(() => {
       passTurn();
       showFeedback('You were idle, so the agent takes this turn');
     }, IDLE_PASS_MS);
     return () => clearTimeout(timer);
-  }, [isVoiceConnected, currentPlayer, gameStatus, nodes.length, newLabel, passTurn]);
+  }, [isVoiceConnected, currentPlayer, gamePhase, nodes.length, newLabel, passTurn]);
 
   return (
     <div style={{
@@ -152,7 +159,7 @@ export default function GameControls() {
         <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
           Nodes: {nodes.length} | Gaps: {gapCount}
         </div>
-        {gameStatus === 'playing' && (
+        {gamePhase === 'playing' && (
           <div style={{ fontSize: '12px', marginTop: '8px', opacity: 0.9 }}>
             {isWinnable ? '✨ Win condition met!' : `Need ${Math.max(0, 5 - nodes.length)} more nodes${gapCount > 0 ? ` & clear ${gapCount} gaps` : ''}`}
           </div>
@@ -175,7 +182,47 @@ export default function GameControls() {
         </div>
       )}
 
-      {gameStatus === 'playing' && currentPlayer === 'agent' && (
+      {gamePhase === 'setup' && (
+        <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
+          <label htmlFor="question-input" style={{ fontSize: '13px', fontWeight: '600', color: '#334155', display: 'block', marginBottom: '8px' }}>
+            What do you want to learn?
+          </label>
+          <input
+            id="question-input"
+            type="text"
+            value={questionDraft}
+            onChange={(e) => setQuestionDraft(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleStart(); }}
+            placeholder="How should I learn agentic web apps?"
+            style={{
+              width: '100%',
+              padding: '8px',
+              border: '1px solid #cbd5e1',
+              borderRadius: '6px',
+              fontSize: '14px',
+              marginBottom: '8px',
+            }}
+          />
+          <button
+            onClick={handleStart}
+            style={{
+              width: '100%',
+              padding: '12px',
+              background: '#6366f1',
+              color: 'white',
+              border: 'none',
+              borderRadius: '6px',
+              fontWeight: '600',
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+          >
+            Start game
+          </button>
+        </div>
+      )}
+
+      {gamePhase === 'playing' && currentPlayer === 'agent' && (
         <div style={{
           background: '#fef3c7',
           color: '#92400e',
@@ -188,7 +235,7 @@ export default function GameControls() {
         </div>
       )}
 
-      {gameStatus === 'playing' && currentPlayer === 'human' && (
+      {gamePhase === 'playing' && currentPlayer === 'human' && (
         <>
           <div style={{ borderTop: '1px solid #e2e8f0', paddingTop: '12px' }}>
             <label htmlFor="node-label" style={{ fontSize: '13px', fontWeight: '600', color: '#334155', display: 'block', marginBottom: '8px' }}>
@@ -272,7 +319,6 @@ export default function GameControls() {
                   <option value="concept">💡 Concept</option>
                   <option value="resource">📚 Resource</option>
                   <option value="skill">⚡ Skill</option>
-                  <option value="gap">❓ Gap</option>
                 </select>
               </div>
 
@@ -387,7 +433,7 @@ export default function GameControls() {
         </>
       )}
 
-      {gameStatus !== 'playing' && (
+      {gamePhase === 'ended' && (
         <button
           onClick={handleReset}
           style={{

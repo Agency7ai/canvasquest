@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { gameToMarkdown, slugify } from './export-markdown';
+import { asideStyle, footnoteStyle } from './panel';
 import { applyShareHash, buildShareUrl } from './persistence';
 import { computeScore, scoreRows } from './scoring';
 import { useGameStore } from './store';
@@ -25,10 +26,13 @@ export default function EndScreen() {
   const currentPlayer = useGameStore(state => state.currentPlayer);
   const isSharedView = useGameStore(state => state.isSharedView);
   const history = useGameStore(state => state.history);
+  const grove = useGameStore(state => state.grove);
   const resetGame = useGameStore(state => state.resetGame);
   const undoLastMove = useGameStore(state => state.undoLastMove);
   const lastAction = history[history.length - 1];
   const canUndoAgent = !isSharedView && lastAction?.player === 'agent';
+  // A shared board is somebody else's tree, so it is never planted here.
+  const inForest = grove.some(tree => tree.question === question);
 
   const score = useMemo(() => computeScore(nodes), [nodes]);
   const markdown = useMemo(() => gameToMarkdown(question, nodes), [question, nodes]);
@@ -87,19 +91,7 @@ export default function EndScreen() {
   };
 
   return (
-    <aside
-      style={{
-        padding: '20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '14px',
-        background: '#f8fafc',
-        borderLeft: '1px solid #e2e8f0',
-        width: '360px',
-        minWidth: '320px',
-        overflowY: 'auto',
-      }}
-    >
+    <aside style={{ ...asideStyle, padding: '20px', gap: '14px' }}>
       <div style={{ background: '#0f172a', color: 'white', padding: '16px', borderRadius: '8px', textAlign: 'center' }}>
         <div style={{ fontSize: '13px', opacity: 0.8, marginBottom: '4px' }}>
           {isSharedView ? 'Shared board' : 'Game over'}
@@ -111,6 +103,12 @@ export default function EndScreen() {
       <div style={{ fontSize: '13px', color: '#475569', lineHeight: 1.4 }}>
         <strong>Question:</strong> {question}
       </div>
+
+      {inForest && (
+        <div style={{ fontSize: '13px', color: '#166534', background: '#ecfdf5', padding: '10px', borderRadius: '6px' }}>
+          🌳 This tree now stands in your forest with {grove.length === 1 ? 'no others yet' : `${grove.length - 1} ${grove.length === 2 ? 'other' : 'others'}`}. Step back in the forest to see them all.
+        </div>
+      )}
 
       <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
         <thead>
@@ -202,9 +200,9 @@ export default function EndScreen() {
         </button>
       </div>
 
-      <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
-        The share link carries the whole board in its URL, so anyone who opens it sees this tree
-        read-only. New game clears the board and the link.
+      <p style={footnoteStyle}>
+        The share link carries the whole board in its URL, so anyone who opens it sees this tree read-only. New
+        game clears the board and the link; the forest keeps the tree.
       </p>
     </aside>
   );

@@ -1,63 +1,23 @@
 import { useEffect, useMemo, useState } from 'react';
-import { computeScore } from './scoring';
+import MoveHistory from './move-history';
 import {
-  AUTO_SKIP_MS,
-  IDLE_PASS_MS,
-  MOVES_PER_PLAYER,
-  type MoveOutcome,
-  describeAction,
-  useGameStore,
-} from './store';
-import type { NodeContent, NodeKind, PlayerType, TreeNode } from './types';
+  KIND_EMOJI,
+  asideStyle,
+  button,
+  darkSectionStyle,
+  feedbackStyle,
+  footnoteStyle,
+  headingStyle,
+  inputStyle,
+  sectionStyle,
+  twoColumns,
+} from './panel';
+import { computeScore } from './scoring';
+import { AUTO_SKIP_MS, IDLE_PASS_MS, MOVES_PER_PLAYER, type MoveOutcome, useGameStore } from './store';
+import type { NodeContent, NodeKind, TreeNode } from './types';
 import { hasWebMCP as detectWebMCP } from './use-webmcp';
 
-/** How many history entries the panel lists. */
-const HISTORY_ROWS = 8;
 const FEEDBACK_MS = 4000;
-
-const KIND_EMOJI: Record<NodeKind, string> = { root: '🌱', concept: '💡', resource: '📚', skill: '⚡' };
-const PLAYER_EMOJI: Record<PlayerType, string> = { human: '🧑', agent: '🤖' };
-
-const sectionStyle = {
-  background: 'white',
-  border: '1px solid #e2e8f0',
-  borderRadius: '8px',
-  padding: '12px',
-  display: 'flex',
-  flexDirection: 'column' as const,
-  gap: '8px',
-};
-
-const headingStyle = {
-  fontSize: '11px',
-  fontWeight: 700,
-  color: '#64748b',
-  textTransform: 'uppercase' as const,
-  letterSpacing: '0.04em',
-};
-
-const inputStyle = {
-  width: '100%',
-  padding: '8px 10px',
-  border: '1px solid #cbd5e1',
-  borderRadius: '6px',
-  fontSize: '13px',
-  boxSizing: 'border-box' as const,
-  fontFamily: 'inherit',
-};
-
-const button = (background: string) => ({
-  padding: '9px 10px',
-  background,
-  color: 'white',
-  border: 'none',
-  borderRadius: '6px',
-  cursor: 'pointer',
-  fontWeight: 600,
-  fontSize: '13px',
-});
-
-const twoColumns = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' };
 
 /**
  * Counts down the human's idle time while a voice agent is live. Keyed by the
@@ -210,7 +170,6 @@ export default function GameControls() {
   const isHumanTurn = currentPlayer === 'human';
   const score = useMemo(() => computeScore(nodes), [nodes]);
   const selected = nodes.find(n => n.id === selectedNodeId) ?? null;
-  const recentHistory = history.slice(-HISTORY_ROWS).reverse();
 
   useEffect(() => {
     if (!feedback) return;
@@ -242,7 +201,7 @@ export default function GameControls() {
   };
 
   const requireSelection = (): TreeNode | null => {
-    if (!selected) setFeedback('Select a node first: click it on the canvas or pick it from the list');
+    if (!selected) setFeedback('Select a node first: click a limb in the forest or on the board, or pick it from the list');
     return selected;
   };
 
@@ -268,20 +227,8 @@ export default function GameControls() {
   };
 
   return (
-    <aside
-      style={{
-        padding: '16px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '12px',
-        background: '#f8fafc',
-        borderLeft: '1px solid #e2e8f0',
-        width: '360px',
-        minWidth: '320px',
-        overflowY: 'auto',
-      }}
-    >
-      <section style={{ background: '#0f172a', color: 'white', padding: '14px', borderRadius: '8px', fontSize: '13px' }}>
+    <aside style={asideStyle}>
+      <section style={darkSectionStyle}>
         <div style={{ fontSize: '11px', opacity: 0.7, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Question</div>
         <div style={{ fontWeight: 600, fontSize: '14px', marginTop: '2px', lineHeight: 1.3 }}>{question}</div>
         <div style={{ marginTop: '10px' }}>
@@ -294,10 +241,7 @@ export default function GameControls() {
       </section>
 
       {feedback && (
-        <div
-          role="status"
-          style={{ padding: '10px', background: '#ecfdf5', color: '#065f46', borderRadius: '6px', fontSize: '13px', lineHeight: 1.4 }}
-        >
+        <div role="status" style={feedbackStyle}>
           {feedback}
         </div>
       )}
@@ -334,8 +278,12 @@ export default function GameControls() {
           />
 
           {nodes.length === 0 ? (
-            <button onClick={() => act(plant(newLabel.trim() || question, 'human'))} style={button('#6366f1')}>
-              🌱 Plant root
+            <button
+              onClick={() => act(plant(newLabel.trim() || question, 'human'))}
+              style={button('#6366f1')}
+              title="Free: planting never costs a move"
+            >
+              🌱 Plant root (free)
             </button>
           ) : (
             <>
@@ -431,42 +379,16 @@ export default function GameControls() {
         </section>
       )}
 
-      <section style={sectionStyle}>
-        <div style={headingStyle}>Recent moves</div>
-        {recentHistory.length === 0 ? (
-          <div style={{ fontSize: '12px', color: '#94a3b8' }}>No moves yet. Plant the root to begin.</div>
-        ) : (
-          <ol
-            reversed
-            start={history.length}
-            style={{
-              margin: 0,
-              paddingLeft: '22px',
-              maxHeight: '170px',
-              overflowY: 'auto',
-              fontSize: '12px',
-              color: '#334155',
-              lineHeight: 1.6,
-            }}
-          >
-            {recentHistory.map((action, index) => (
-              <li key={`${action.timestamp}-${index}`}>
-                {PLAYER_EMOJI[action.player]} {describeAction(action)}
-                {action.costsMove ? '' : <span style={{ color: '#94a3b8' }}> (free)</span>}
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
+      <MoveHistory history={history} emptyText="No moves yet. Plant the root to begin." />
 
       <button onClick={handleReset} style={{ ...button('white'), color: '#b91c1c', border: '1px solid #fecaca' }}>
         Reset game
       </button>
 
-      <p style={{ margin: 0, fontSize: '11px', color: '#94a3b8', lineHeight: 1.5 }}>
-        Each player has {MOVES_PER_PLAYER} moves. Branching, pruning and marking gaps cost one; passing, notes
-        and links are free. Score comes from coverage, depth, a mix of kinds, shared authorship and content,
-        minus 5 per open gap.
+      <p style={footnoteStyle}>
+        Each player has {MOVES_PER_PLAYER} moves. Branching, pruning and marking gaps cost one; planting, passing,
+        notes and links are free. Score comes from coverage, depth, a mix of kinds, shared authorship and content,
+        minus 5 per open gap. The finished tree is planted in your forest.
       </p>
     </aside>
   );

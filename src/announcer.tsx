@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { browserSpeaker, canUseBrowserVoice, pickVoice } from './speech';
-import type { Cancel, Speaker, SpeechEvents } from './speech';
+import { browserVoice, canUseBrowserVoice, pickVoice } from './speech';
+import type { Cancel, Speaker, SpeechEvents, Voice } from './speech';
 import { useGameStore } from './store';
 
 /** Remembered per browser, so a muted page stays muted across games. */
@@ -26,19 +26,20 @@ const noop: Cancel = () => {};
 
 /**
  * The agent's voice on the page. Each announce call shows the agent's summary
- * and its handoff line over the board and reads them aloud: with an ElevenLabs
- * voice when a text-to-speech key is configured, otherwise with the browser's
- * own speech synthesis, so a text-only agent can still say "your turn". A
- * connected voice agent already speaks for itself, so while a voice session
- * is live only the text is shown.
+ * and its handoff line over the board and reads them aloud: with the site's
+ * voice, ElevenLabs text-to-speech behind /api/speak, when the site has a key,
+ * otherwise with the browser's own speech synthesis, so a text-only agent can
+ * still say "your turn". A connected voice agent already speaks for itself, so
+ * while a voice session is live only the text is shown.
  */
 export default function AgentAnnouncer() {
   const announcement = useGameStore(state => state.announcement);
   const dismiss = useGameStore(state => state.dismissAnnouncement);
 
-  // Chosen once per page: the ElevenLabs voice when a key is configured, else
-  // the browser's own, else nothing to read with.
-  const [voice] = useState(pickVoice);
+  // The site's voice wherever audio can play, else the browser's own, else
+  // nothing to read with. A site without a voice (no key, or a static host
+  // with no function) hands over to the browser voice for the rest of the visit.
+  const [voice, setVoice] = useState<Voice | null>(pickVoice);
   const [muted, setMuted] = useState(readMuted);
   const [speaking, setSpeaking] = useState(false);
   // Browsers refuse to play sound until the page has been clicked or tapped once.
@@ -65,7 +66,7 @@ export default function AgentAnnouncer() {
     const lines = [announcement.summary, announcement.handoff].filter((line): line is string => Boolean(line));
     const note = (message: string) => setVoiceNote({ id: announcement.id, message });
 
-    const events: Omit<SpeechEvents, 'onError'> = {
+    const events: Omit<SpeechEvents, 'onError' | 'onUnavailable'> = {
       onStart: () => {
         setBlocked(false);
         setSpeaking(true);
@@ -76,24 +77,37 @@ export default function AgentAnnouncer() {
         setBlocked(true);
       },
     };
-    const start = (speak: Speaker, onError: SpeechEvents['onError']) => {
+    const start = (
+      speak: Speaker,
+      onError: SpeechEvents['onError'],
+      onUnavailable: SpeechEvents['onUnavailable'],
+    ) => {
       cancelRef.current();
-      cancelRef.current = speak(lines, { ...events, onError });
+      cancelRef.current = speak(lines, { ...events, onError, onUnavailable });
     };
     const giveUp = (message: string) => {
       setSpeaking(false);
       note(message);
     };
 
-    // When ElevenLabs fails the browser voice steps in, so the line is still heard.
-    start(voice.speak, message => {
-      if (voice.kind === 'elevenlabs' && canUseBrowserVoice()) {
-        note(`${message}. Using the browser voice instead.`);
-        start(browserSpeaker, giveUp);
-      } else {
-        giveUp(message);
-      }
-    });
+    start(
+      voice.speak,
+      message => {
+        // When the site's voice fails the browser voice steps in, so the line
+        // is still heard. The browser voice never reports itself unavailable.
+        if (voice.kind === 'site' && canUseBrowserVoice()) {
+          note(`${message}. Using the browser voice instead.`);
+          start(browserVoice.speak, giveUp, noop);
+        } else {
+          giveUp(message);
+        }
+      },
+      () => {
+        // No site voice here: switch to the browser's for good. The effect runs
+        // again with the new voice and reads this announcement with it.
+        setVoice(canUseBrowserVoice() ? browserVoice : null);
+      },
+    );
 
     return () => {
       cancelRef.current();

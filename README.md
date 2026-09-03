@@ -54,7 +54,7 @@ Trees grow limb by limb as nodes are added; with the system's reduced-motion set
 - **Budgets.** After the opening each player has 6 moves. The budgets are separate: the human running out never costs the agent a move, and vice versa.
 - **Costly moves.** `branch`, `prune` and `mark_gap` each cost one move and must be made on your own turn.
 - **Free moves.** `plant`, `annotate` (add or change a note or link), `edit_note` (add to a note or change one passage of it), `announce`, `pass`, `get_board` and `get_node_state` are free and never change whose turn it is. Anyone can annotate any node at any time while the game is running. The human can also unmark a gap they marked themselves for free, which gives the move back.
-- **Announcements.** `announce` is the agent's voice on the page: a short summary of what it is doing, plus an optional "your turn" line, shown over the forest and read aloud: by an ElevenLabs voice when `VITE_ELEVENLABS_API_KEY` is set (see [Announcement voice](#announcement-voice-optional)), otherwise by the browser's own speech synthesis with no key involved. It is allowed in any phase and never touches the board or the turn. The **Mute** button on the announcement mutes the speech and the choice is remembered; the text stays. While a voice session is connected the page shows the text but stays quiet, since the agent already speaks. Browsers only play sound after the page has been clicked once, and the announcement says so if it was blocked. If the ElevenLabs request fails, the browser voice reads the line instead and the announcement says why.
+- **Announcements.** `announce` is the agent's voice on the page: a short summary of what it is doing, plus an optional "your turn" line, shown over the forest and read aloud: by the site's ElevenLabs voice when the deployment has a text-to-speech key (see [Announcement voice](#announcement-voice-optional)), otherwise by the browser's own speech synthesis with no key involved. It is allowed in any phase and never touches the board or the turn. The **Mute** button on the announcement mutes the speech and the choice is remembered; the text stays. While a voice session is connected the page shows the text but stays quiet, since the agent already speaks. Browsers only play sound after the page has been clicked once, and the announcement says so if it was blocked. If the ElevenLabs request fails, the browser voice reads the line instead and the announcement says why.
 - **Notes.** A node's note is a Markdown document. **View markdown** in the side panel (or a double-click on a board node) slides the note down over the whole app, source on the left and rendered preview on the right. It saves as you type (⌘S or Ctrl+S saves at once, Esc closes) and the side panel shows the first line. The agent writes in the same note through `edit_note`, appending a section or rewording one passage, and its words appear in the open editor around whatever you are typing; if the two of you change the same passage at once, a banner lets you pick a version. The agent also hears when you have edited a note, so it can read and build on it. Notes are free, capped at 20,000 characters so the board still fits a share link, and go into the exported study plan.
 - **Turns.** Turns alternate after every costly move. A player with no moves left is skipped, so the other player keeps the turn until their own budget is spent.
 - **Stalled agent.** The human can skip the agent's turn at any time. With no agent connected (no WebMCP tools registered and no voice session), the agent's turn is skipped automatically after one second. With a voice agent connected, fifteen seconds without a human edit passes the human's turn automatically, with a visible countdown.
@@ -176,17 +176,19 @@ Rules you must follow:
 
 ## Announcement voice (optional)
 
-Announcements are read aloud by the browser's own speech synthesis by default, which needs no key. To hear them in an ElevenLabs voice instead, add a text-to-speech key to `.env` and rebuild:
+Announcements are read aloud by the browser's own speech synthesis by default, which needs no key. To hear them in an ElevenLabs voice instead, give the deployment a text-to-speech key:
 
 ```text
-VITE_ELEVENLABS_API_KEY=sk_...   # the ElevenLabs voice is on when this is set
-VITE_ELEVENLABS_VOICE_ID=        # optional, defaults to George (JBFqnCBsd6RMkjVDRZzb)
-VITE_ELEVENLABS_TTS_MODEL=       # optional, defaults to eleven_flash_v2_5
+ELEVENLABS_API_KEY=sk_...   # the ElevenLabs voice is on when this is set
+ELEVENLABS_VOICE_ID=        # optional, defaults to George (JBFqnCBsd6RMkjVDRZzb)
+ELEVENLABS_TTS_MODEL=       # optional, defaults to eleven_flash_v2_5
 ```
 
-The page then calls the ElevenLabs text-to-speech API straight from the browser for each announcement (one request per `announce` call, summary and handoff together) and plays the audio it gets back. If the request fails, the browser voice reads the line instead and the announcement says why. Nothing is requested while announcements are muted or while a voice session is connected, since the agent already speaks then.
+The key never reaches the browser. It has no `VITE_` prefix, so Vite keeps it out of the bundle, and only `api/speak.ts` reads it: a Vercel function, deployed with the site as `POST /api/speak`, that takes an announcement's text, asks ElevenLabs for the audio and passes it back. The page makes one request per `announce` call (summary and handoff together) and plays what it gets. The dev server and `npm run preview` serve the same function, so a key in `.env.local` works locally too, and `GET /api/speak` answers `{ "voice": "elevenlabs" }` or `{ "voice": null }` to show whether a deployment has one.
 
-A `VITE_` variable is compiled into the JavaScript bundle, so anyone who can open the page can read the key. Use a key made for this purpose, restricted to text-to-speech with a credit quota, and keep it out of a public deployment; there, a small proxy that holds the key server-side is the right shape.
+On Vercel, add `ELEVENLABS_API_KEY` to the project's environment variables as a Secret and redeploy. A visitor can make the site speak but never read the key, and the function answers its own pages only (same origin), caps the text at one announcement's length and rate-limits each address. A key made for this purpose, restricted to text-to-speech with a credit quota, is still the right one to use.
+
+Without a key, or on a static host with no functions at all, the page notices on the first announcement and uses the browser voice for the rest of the visit. If a request fails, the browser voice reads that line instead and the announcement says why. Nothing is requested while announcements are muted or while a voice session is connected, since the agent already speaks then.
 
 ## WebMCP integration
 
@@ -224,7 +226,7 @@ npm run dev
 | `npm run lint` | oxlint |
 | `npm run preview` | Serves the production build |
 
-The build is fully static. There is no backend, and no key is needed to play. The optional configuration lives in `.env`: the ElevenLabs agent id, and a text-to-speech key for the announcement voice, which, like every `VITE_` variable, ends up in the bundle. `package-lock.json` is committed, so `npm ci` gives a reproducible install.
+The front end is a static build, and no key is needed to play. The one server piece is `api/speak.ts`, the Vercel function behind the announcement voice: it holds the ElevenLabs key so the bundle never does, and without it the page uses the browser voice. The optional configuration lives in `.env.local`: the ElevenLabs agent id, a `VITE_` variable that ends up in the bundle, and the text-to-speech key, which has no prefix and stays on the server. `package-lock.json` is committed, so `npm ci` gives a reproducible install.
 
 ## Architecture
 
@@ -259,8 +261,9 @@ The build is fully static. There is no backend, and no key is needed to play. Th
 | `src/use-webmcp.ts` | Registers `TOOL_DEFINITIONS` with WebMCP. |
 | `src/voice-agent.tsx` | ElevenLabs conversation panel, the client tool hooks and the status lines sent to the agent. |
 | `src/voice-agent-island.tsx` | Lazy-loads the voice panel so the ElevenLabs client is only fetched when needed. |
-| `src/announcer.tsx` | The agent's announcements over the forest: shows the summary and the handoff line and reads them aloud, falling back to the browser voice when ElevenLabs fails. |
-| `src/speech.ts` | The two voices behind announcements: ElevenLabs text-to-speech, called straight from the browser with `VITE_ELEVENLABS_API_KEY`, and the browser's speech synthesis. |
+| `src/announcer.tsx` | The agent's announcements over the forest: shows the summary and the handoff line and reads them aloud with the site's voice, falling back to the browser's when the site has none or a request fails. |
+| `src/speech.ts` | The two voices behind announcements: the site's, which posts the text to `/api/speak` and plays the audio back, and the browser's speech synthesis. |
+| `api/speak.ts` | The Vercel function behind `/api/speak`: reads an announcement aloud through ElevenLabs with the server-side key. `vite.config.ts` mounts it on the dev and preview servers. |
 | `elevenlabs-tools.json` | Client tool definitions for the ElevenLabs dashboard. |
 
 ### Tools vs UI
@@ -276,7 +279,7 @@ Selection, the current view and the tree the human has walked into live in the s
 
 ### Bundle
 
-`npm run build` emits a static `dist/` folder. three.js and the forest are split into their own chunk and fetched as the landing page draws; the ElevenLabs client is lazy-loaded so the voice code only downloads when the island is opened.
+`npm run build` emits a static `dist/` folder. three.js and the forest are split into their own chunk and fetched as the landing page draws; the ElevenLabs client is lazy-loaded so the voice code only downloads when the island is opened. The function in `api/` is not part of the bundle: Vercel builds it on its own, and the page works without it.
 
 ## License
 

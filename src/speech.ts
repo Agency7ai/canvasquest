@@ -1,7 +1,9 @@
 /**
- * The voices that read announcements aloud. ElevenLabs text-to-speech when a
- * key is configured, otherwise the browser's own speech synthesis, which also
- * steps in when ElevenLabs cannot be reached.
+ * The voices that read announcements aloud. The site's voice is ElevenLabs
+ * text-to-speech behind /api/speak (see api/speak.ts), so no key reaches the
+ * browser. The browser's own speech synthesis is the other, and steps in when
+ * the site cannot speak: no key configured, no function on a static host, or
+ * a request that fails.
  */
 
 export interface SpeechEvents {
@@ -11,8 +13,10 @@ export interface SpeechEvents {
   onEnd: () => void;
   /** The browser refused to play sound before the page was clicked. */
   onBlocked: () => void;
-  /** The voice failed; the message is fit to show on the page. */
+  /** The voice failed this time; the message is fit to show on the page. */
   onError: (message: string) => void;
+  /** This page has no such voice at all (no key, no endpoint): no use trying again this visit. */
+  onUnavailable: () => void;
 }
 
 /** Stops the speech. Safe to call more than once, or after it has ended. */
@@ -21,48 +25,44 @@ export type Cancel = () => void;
 /** Reads the lines aloud, in order, and reports how it went. */
 export type Speaker = (lines: string[], events: SpeechEvents) => Cancel;
 
-export interface ElevenLabsTtsConfig {
-  apiKey: string;
-  voiceId: string;
-  modelId: string;
-}
+/** Where the page asks the site to voice a line. */
+export const SPEAK_ENDPOINT = '/api/speak';
 
-/** "George", one of ElevenLabs' stock voices. */
-export const DEFAULT_VOICE_ID = 'JBFqnCBsd6RMkjVDRZzb';
-/** The low-latency model: announcements are short and should start quickly. */
-export const DEFAULT_MODEL_ID = 'eleven_flash_v2_5';
-export const OUTPUT_FORMAT = 'mp3_44100_128';
-
-type SpeechEnv = Pick<
-  ImportMetaEnv,
-  'VITE_ELEVENLABS_API_KEY' | 'VITE_ELEVENLABS_VOICE_ID' | 'VITE_ELEVENLABS_TTS_MODEL'
->;
-
-/** The ElevenLabs voice from the environment, or null when no key is set. */
-export function elevenLabsConfig(env: SpeechEnv = import.meta.env): ElevenLabsTtsConfig | null {
-  const apiKey = env.VITE_ELEVENLABS_API_KEY?.trim();
-  if (!apiKey) return null;
+/** The request that asks the site for one piece of text as audio. */
+export function buildSpeakRequest(text: string): { url: string; init: RequestInit } {
   return {
-    apiKey,
-    voiceId: env.VITE_ELEVENLABS_VOICE_ID?.trim() || DEFAULT_VOICE_ID,
-    modelId: env.VITE_ELEVENLABS_TTS_MODEL?.trim() || DEFAULT_MODEL_ID,
-  };
-}
-
-/** The text-to-speech call for one piece of text. */
-export function buildTtsRequest(text: string, config: ElevenLabsTtsConfig): { url: string; init: RequestInit } {
-  return {
-    url: `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(config.voiceId)}?output_format=${OUTPUT_FORMAT}`,
+    url: SPEAK_ENDPOINT,
     init: {
       method: 'POST',
-      headers: {
-        'xi-api-key': config.apiKey,
-        'Content-Type': 'application/json',
-        Accept: 'audio/mpeg',
-      },
-      body: JSON.stringify({ text, model_id: config.modelId }),
+      headers: { 'Content-Type': 'application/json', Accept: 'audio/mpeg' },
+      body: JSON.stringify({ text }),
     },
   };
+}
+
+/** What the site answered: audio to play, no voice to be had, or a failure to report. */
+export type SpeakVerdict = 'audio' | 'unavailable' | 'failed';
+
+export function judgeSpeakResponse(response: Response): SpeakVerdict {
+  if (response.ok) {
+    // A static host answers a POST with its index page; a real voice with audio.
+    return (response.headers.get('content-type') ?? '').startsWith('audio/') ? 'audio' : 'unavailable';
+  }
+  // 503: the site has no key. 404: nothing behind the path. 405 and 501: a
+  // server that takes no POST there. None of them changes within a visit.
+  return [404, 405, 501, 503].includes(response.status) ? 'unavailable' : 'failed';
+}
+
+/** The site's own account of a failure when it gave one, else the bare status. */
+export async function describeSpeakFailure(response: Response): Promise<string> {
+  try {
+    const body: unknown = await response.json();
+    const error = typeof body === 'object' && body !== null && 'error' in body ? body.error : null;
+    if (typeof error === 'string' && error) return error;
+  } catch {
+    // Not JSON: the status will have to do.
+  }
+  return `The site voice answered ${response.status}`;
 }
 
 /** Speech synthesis is a browser feature; a page without it just shows the text. */
@@ -122,20 +122,17 @@ const isNotAllowed = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && (error as { name?: unknown }).name === 'NotAllowedError';
 
 const describeError = (error: unknown): string => {
-  // fetch rejects with a TypeError when the network or CORS stops the call.
-  if (error instanceof TypeError) return 'ElevenLabs could not be reached';
+  // fetch rejects with a TypeError when the network stops the call.
+  if (error instanceof TypeError) return 'The site voice could not be reached';
   return error instanceof Error ? error.message : String(error);
 };
 
 /**
- * Reads the lines with an ElevenLabs voice: one text-to-speech request, played
+ * Reads the lines with the site's voice: one request to /api/speak, played
  * through an audio element. Everything is torn down on cancel, so a new
  * announcement can cut an old one off mid-sentence.
  */
-export function elevenLabsSpeaker(
-  config: ElevenLabsTtsConfig,
-  fetchImpl: FetchLike = (url, init) => fetch(url, init),
-): Speaker {
+export function siteSpeaker(fetchImpl: FetchLike = (url, init) => fetch(url, init)): Speaker {
   return (lines, events) => {
     const controller = new AbortController();
     let audio: HTMLAudioElement | null = null;
@@ -156,10 +153,15 @@ export function elevenLabsSpeaker(
       }
     };
 
-    const { url, init } = buildTtsRequest(lines.join(LINE_BREAK), config);
+    const { url, init } = buildSpeakRequest(lines.join(LINE_BREAK));
     fetchImpl(url, { ...init, signal: controller.signal })
       .then(async response => {
-        if (!response.ok) throw new Error(`ElevenLabs answered ${response.status}`);
+        const verdict = judgeSpeakResponse(response);
+        if (verdict === 'unavailable') {
+          if (!cancelled) events.onUnavailable();
+          return;
+        }
+        if (verdict === 'failed') throw new Error(await describeSpeakFailure(response));
         const blob = await response.blob();
         if (cancelled) return;
 
@@ -173,7 +175,7 @@ export function elevenLabsSpeaker(
         };
         player.onerror = () => {
           release();
-          events.onError('The ElevenLabs audio could not be played');
+          events.onError('The site voice audio could not be played');
         };
         try {
           await player.play();
@@ -198,18 +200,23 @@ export function elevenLabsSpeaker(
 }
 
 export interface Voice {
-  kind: 'elevenlabs' | 'browser';
+  kind: 'site' | 'browser';
   /** For the mute button's tooltip. */
   label: string;
   speak: Speaker;
 }
 
-/** The best voice this page can use, or null when it cannot speak at all. */
-export function pickVoice(env: SpeechEnv = import.meta.env): Voice | null {
-  const config = elevenLabsConfig(env);
-  if (config && typeof Audio === 'function') {
-    return { kind: 'elevenlabs', label: 'ElevenLabs voice', speak: elevenLabsSpeaker(config) };
+export const browserVoice: Voice = { kind: 'browser', label: 'browser voice', speak: browserSpeaker };
+
+/**
+ * The best voice this page can use, or null when it cannot speak at all. The
+ * site's voice comes first wherever audio can play; whether the site really
+ * has one only shows on the first request, which is why a speaker can report
+ * itself unavailable.
+ */
+export function pickVoice(): Voice | null {
+  if (typeof Audio === 'function' && typeof fetch === 'function') {
+    return { kind: 'site', label: 'site voice', speak: siteSpeaker() };
   }
-  if (canUseBrowserVoice()) return { kind: 'browser', label: 'browser voice', speak: browserSpeaker };
-  return null;
+  return canUseBrowserVoice() ? browserVoice : null;
 }

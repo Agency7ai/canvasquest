@@ -1,11 +1,14 @@
+import { ACTIVE_BOARD_ID } from './app-meta';
 import { computeImplicitGaps, computeScore } from './scoring';
-import { useGameStore, BRANCH_KINDS, MOVES_PER_PLAYER } from './store';
-import type { GamePhase, NodeKind, PlayerType } from './types';
+import { useGameStore, BRANCH_KINDS, MOVES_PER_PLAYER, OPENING_MOVES } from './store';
+import type { GamePhase, NodeKind, PlayerType, Visualization } from './types';
 
 export interface MoveResult {
   success: boolean;
   message: string;
   nodeId?: string;
+  /** The node that get_node_state read. */
+  node?: NodeDetail;
   board: BoardSummary;
 }
 
@@ -21,12 +24,22 @@ export interface BoardNode {
   url?: string;
 }
 
+/** One node with its surroundings, for get_node_state. */
+export interface NodeDetail extends BoardNode {
+  parentLabel: string | null;
+  childIds: string[];
+  /** Whether the human currently has this node selected. */
+  selected: boolean;
+}
+
 export interface BoardSummary {
   question: string;
   gamePhase: GamePhase;
   currentPlayer: PlayerType;
   humanMoves: number;
   agentMoves: number;
+  /** Free opening moves the agent may still make; 0 outside the opening. */
+  openingMovesLeft: number;
   totalNodes: number;
   /** Live score out of 100. */
   score: number;
@@ -34,7 +47,39 @@ export interface BoardSummary {
   openGaps: string[];
   /** Concepts with no resource or skill beneath them yet. */
   implicitGaps: string[];
+  /** The node the human has clicked, if any. */
+  selectedNodeId: string | null;
+  /** Whether the human is looking at the forest or the flat board. */
+  visualization: Visualization;
+  /** The tree the human has stepped into in the forest, if any. */
+  focusedTree: { id: string; question: string; isActive: boolean } | null;
   nodes: BoardNode[];
+}
+
+type StoreState = ReturnType<typeof useGameStore.getState>;
+
+function summarizeNode(node: StoreState['nodes'][number]): BoardNode {
+  return {
+    id: node.id,
+    label: node.label,
+    kind: node.kind,
+    parentId: node.parentId,
+    createdBy: node.createdBy,
+    isGap: node.isGap,
+    ...(node.gapReason ? { gapReason: node.gapReason } : {}),
+    ...(node.note ? { note: node.note } : {}),
+    ...(node.url ? { url: node.url } : {}),
+  };
+}
+
+function describeFocusedTree(state: StoreState): BoardSummary['focusedTree'] {
+  const { focusedTreeId } = state;
+  if (focusedTreeId === null) return null;
+  if (focusedTreeId === ACTIVE_BOARD_ID) {
+    return { id: focusedTreeId, question: state.question, isActive: true };
+  }
+  const tree = state.grove.find(t => t.id === focusedTreeId);
+  return tree ? { id: tree.id, question: tree.question, isActive: false } : null;
 }
 
 export function readBoard(): BoardSummary {
@@ -46,21 +91,29 @@ export function readBoard(): BoardSummary {
     currentPlayer: state.currentPlayer,
     humanMoves: state.humanMoves,
     agentMoves: state.agentMoves,
+    openingMovesLeft:
+      state.gamePhase === 'opening' ? Math.max(0, OPENING_MOVES - state.openingMovesUsed) : 0,
     totalNodes: state.nodes.length,
     score: score.total,
     openGaps: score.openGaps,
     implicitGaps: computeImplicitGaps(state.nodes),
-    nodes: state.nodes.map(n => ({
-      id: n.id,
-      label: n.label,
-      kind: n.kind,
-      parentId: n.parentId,
-      createdBy: n.createdBy,
-      isGap: n.isGap,
-      ...(n.gapReason ? { gapReason: n.gapReason } : {}),
-      ...(n.note ? { note: n.note } : {}),
-      ...(n.url ? { url: n.url } : {}),
-    })),
+    selectedNodeId: state.selectedNodeId,
+    visualization: state.visualization,
+    focusedTree: describeFocusedTree(state),
+    nodes: state.nodes.map(summarizeNode),
+  };
+}
+
+function describeNode(nodeId: string): NodeDetail | null {
+  const { nodes, selectedNodeId } = useGameStore.getState();
+  const node = nodes.find(n => n.id === nodeId);
+  if (!node) return null;
+  const parent = node.parentId === null ? undefined : nodes.find(n => n.id === node.parentId);
+  return {
+    ...summarizeNode(node),
+    parentLabel: parent?.label ?? null,
+    childIds: nodes.filter(n => n.parentId === node.id).map(n => n.id),
+    selected: node.id === selectedNodeId,
   };
 }
 
@@ -99,6 +152,7 @@ const optionalText = (value: unknown): string | undefined =>
 
 export type MoveName =
   | 'get_board'
+  | 'get_node_state'
   | 'plant'
   | 'branch'
   | 'prune'
@@ -117,6 +171,22 @@ export function applyMove(name: MoveName, input: Record<string, unknown>): MoveR
   switch (name) {
     case 'get_board':
       return { success: true, message: 'Current board', board: readBoard() };
+
+    case 'get_node_state': {
+      const reference = optionalText(input.nodeId)?.trim() ?? '';
+      const nodeId = reference ? resolveNodeId(reference) : store.selectedNodeId;
+      if (reference && !nodeId) return unresolved(reference);
+      if (!nodeId) {
+        return {
+          success: false,
+          message: 'Nothing is selected: pass a nodeId or ask the human to click a node.',
+          board: readBoard(),
+        };
+      }
+      const node = describeNode(nodeId);
+      if (!node) return unresolved(nodeId);
+      return { success: true, message: `Node "${node.label}"`, nodeId: node.id, node, board: readBoard() };
+    }
 
     case 'plant': {
       const label = String(input.label ?? '').trim();
@@ -208,6 +278,8 @@ const NODE_REFERENCE = 'The id (for example "n2") or the exact label of the targ
 
 const COSTS_A_MOVE = `Costs one of your ${MOVES_PER_PLAYER} moves and ends your turn.`;
 
+const OPENING_NOTE = `During your opening (gamePhase "opening") it is free instead, and the opening ends after ${OPENING_MOVES} such moves or when you pass.`;
+
 /**
  * Tool descriptions double as the rulebook the agent plays by, so each one
  * states what the move costs and which rules it can trip over.
@@ -216,13 +288,29 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'get_board',
     description:
-      'Read the current board: the question, every node (id, label, kind, parentId, createdBy, isGap, gapReason, note, url), both move budgets, whose turn it is, the live score out of 100, and openGaps (explicit gaps plus implicit ones: concepts with no resource or skill beneath them). Free: costs no move. Call it before every move so you use real node ids.',
+      'Read the current board: the question, gamePhase (setup, opening, playing or ended), every node (id, label, kind, parentId, createdBy, isGap, gapReason, note, url), both move budgets, whose turn it is, openingMovesLeft, the live score out of 100, openGaps (explicit gaps plus implicit ones: concepts with no resource or skill beneath them), selectedNodeId (the node the human clicked), visualization (forest or board) and focusedTree. Free: costs no move. Call it before every move so you use real node ids.',
     readOnly: true,
     inputSchema: { type: 'object', properties: {} },
   },
   {
+    name: 'get_node_state',
+    description:
+      'Read one node in detail: its label, kind, parent, children, gap flag and reason, note, url, who created it and whether the human has it selected. Omit nodeId to read the node the human currently has selected. Free: costs no move.',
+    readOnly: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nodeId: {
+          type: 'string',
+          description:
+            'The id (for example "n2") or the exact label of the node. Omit it to read the selected node.',
+        },
+      },
+    },
+  },
+  {
     name: 'plant',
-    description: `Plant the root node. Only valid as the first move, when the board is empty. Use the question itself as the label. ${COSTS_A_MOVE}`,
+    description: `Plant the root node on an empty board, using the question itself as the label. Free: costs no move. Before a game has started this starts one, with the label as the question. As the agent you then open the game: grow up to ${OPENING_MOVES} free branches under the root and call pass to hand over to the human.`,
     readOnly: false,
     inputSchema: {
       type: 'object',
@@ -238,7 +326,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'branch',
-    description: `Add a child node under an existing node. ${COSTS_A_MOVE} A resource or skill branched directly under a gap closes that gap automatically. A concept with no resource or skill anywhere beneath it counts as an implicit gap and costs points at the end, so follow concepts with resources and skills. Scoring rewards coverage (concepts with a resource or skill under them), depth up to three levels, having all three kinds, both players contributing, and notes or urls on nodes.`,
+    description: `Add a child node under an existing node. ${COSTS_A_MOVE} ${OPENING_NOTE} A resource or skill branched directly under a gap closes that gap automatically. A concept with no resource or skill anywhere beneath it counts as an implicit gap and costs points at the end, so follow concepts with resources and skills. Scoring rewards coverage (concepts with a resource or skill under them), depth up to three levels, having all three kinds, both players contributing, and notes or urls on nodes.`,
     readOnly: false,
     inputSchema: {
       type: 'object',
@@ -259,7 +347,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'prune',
-    description: `Remove a node and everything under it. ${COSTS_A_MOVE} The root cannot be pruned. The human can undo your most recent action, so prune only what is clearly off-topic or duplicated.`,
+    description: `Remove a node and everything under it. ${COSTS_A_MOVE} ${OPENING_NOTE} The root cannot be pruned. The human can undo your most recent action, so prune only what is clearly off-topic or duplicated.`,
     readOnly: false,
     inputSchema: {
       type: 'object',
@@ -271,7 +359,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'mark_gap',
-    description: `Flag a node as an open knowledge gap that the other player should fill, keeping its kind. ${COSTS_A_MOVE} You cannot mark the root, a node that is already a gap, or a node that already has a resource or skill directly under it. Every gap still open when the game ends costs 5 points, so mark gaps you expect to be filled and give a reason.`,
+    description: `Flag a node as an open knowledge gap that the other player should fill, keeping its kind. ${COSTS_A_MOVE} ${OPENING_NOTE} You cannot mark the root, a node that is already a gap, or a node that already has a resource or skill directly under it. Every gap still open when the game ends costs 5 points, so mark gaps you expect to be filled and give a reason.`,
     readOnly: false,
     inputSchema: {
       type: 'object',
@@ -303,7 +391,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'pass',
     description:
-      'End your turn without moving. Free: costs no move. If both players yield in a row the game ends, so pass only when you have nothing to add or want the human to respond first.',
+      'End your turn without moving. Free: costs no move. During your opening this hands the board to the human, which is how the opening should end. Later, if both players yield in a row the game ends, so pass only when you have nothing to add or want the human to respond first.',
     readOnly: false,
     inputSchema: { type: 'object', properties: {} },
   },

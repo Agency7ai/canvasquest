@@ -2,7 +2,15 @@ export type NodeKind = 'root' | 'concept' | 'resource' | 'skill';
 
 export type PlayerType = 'human' | 'agent';
 
-export type GamePhase = 'setup' | 'playing' | 'ended';
+/**
+ * setup: no question yet. opening: the agent sets the board up on its own, for
+ * free, before the human joins. playing: alternating turns with budgets.
+ * ended: the tree is finished and stands in the forest.
+ */
+export type GamePhase = 'setup' | 'opening' | 'playing' | 'ended';
+
+/** How the board is shown: the living forest, or the flat, labelled board. */
+export type Visualization = 'forest' | 'board';
 
 export interface TreeNode {
   id: string;
@@ -37,6 +45,8 @@ export interface GameAction {
   kind?: NodeKind;
   /** Whether the action consumed a move; undo refunds it if so. */
   costsMove: boolean;
+  /** Made during the agent's opening: free, but counted toward OPENING_MOVES. */
+  opening?: boolean;
   /** Every node as it was before the action, so undo is lossless. */
   before: TreeNode[];
 }
@@ -52,6 +62,8 @@ export interface GameState {
   agentMoves: number;
   /** Turns yielded in a row (a pass or a skip) with no move between them. */
   consecutivePasses: number;
+  /** Free moves the agent has made in its opening so far. */
+  openingMovesUsed: number;
   history: GameAction[];
 }
 
@@ -64,6 +76,17 @@ export interface SavedGame {
   currentPlayer: PlayerType;
   gamePhase: GamePhase;
   history: GameAction[];
+  openingMovesUsed: number;
+}
+
+/** A finished board standing in the forest. */
+export interface PlantedTree {
+  id: string;
+  question: string;
+  nodes: TreeNode[];
+  score: number;
+  /** Epoch milliseconds when the tree was planted. */
+  plantedAt: number;
 }
 
 export interface WebMCPTool {

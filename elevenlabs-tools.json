@@ -4,7 +4,7 @@
     {
       "type": "client",
       "name": "get_board",
-      "description": "Read the current board: the question, every node (id, label, kind, parentId, createdBy, isGap, gapReason, note, url), both move budgets, whose turn it is, the live score out of 100, and openGaps (explicit gaps plus implicit ones: concepts with no resource or skill beneath them). Free: costs no move. Call it before every move so you use real node ids.",
+      "description": "Read the current board: the question, gamePhase (setup, opening, playing or ended), every node (id, label, kind, parentId, createdBy, isGap, gapReason, note, url), both move budgets, whose turn it is, openingMovesLeft, the live score out of 100, openGaps (explicit gaps plus implicit ones: concepts with no resource or skill beneath them), selectedNodeId (the node the human clicked), visualization (forest or board) and focusedTree. Free: costs no move. Call it before every move so you use real node ids.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [],
@@ -19,8 +19,34 @@
     },
     {
       "type": "client",
+      "name": "get_node_state",
+      "description": "Read one node in detail: its label, kind, parent, children, gap flag and reason, note, url, who created it and whether the human has it selected. Omit nodeId to read the node the human currently has selected. Free: costs no move.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": [
+        {
+          "id": "nodeId",
+          "type": "string",
+          "description": "The id (for example \"n2\") or the exact label of the node. Omit it to read the selected node.",
+          "dynamic_variable": "",
+          "required": false,
+          "constant_value": "",
+          "value_type": "llm_prompt"
+        }
+      ],
+      "dynamic_variables": {
+        "dynamic_variable_placeholders": {}
+      },
+      "assignments": [],
+      "interruption_mode": "allow",
+      "tool_call_sound": null,
+      "tool_call_sound_behavior": "auto",
+      "response_mocks": []
+    },
+    {
+      "type": "client",
       "name": "plant",
-      "description": "Plant the root node. Only valid as the first move, when the board is empty. Use the question itself as the label. Costs one of your 6 moves and ends your turn.",
+      "description": "Plant the root node on an empty board, using the question itself as the label. Free: costs no move. Before a game has started this starts one, with the label as the question. As the agent you then open the game: grow up to 3 free branches under the root and call pass to hand over to the human.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [
@@ -55,7 +81,7 @@
     {
       "type": "client",
       "name": "branch",
-      "description": "Add a child node under an existing node. Costs one of your 6 moves and ends your turn. A resource or skill branched directly under a gap closes that gap automatically. A concept with no resource or skill anywhere beneath it counts as an implicit gap and costs points at the end, so follow concepts with resources and skills. Scoring rewards coverage (concepts with a resource or skill under them), depth up to three levels, having all three kinds, both players contributing, and notes or urls on nodes.",
+      "description": "Add a child node under an existing node. Costs one of your 6 moves and ends your turn. During your opening (gamePhase \"opening\") it is free instead, and the opening ends after 3 such moves or when you pass. A resource or skill branched directly under a gap closes that gap automatically. A concept with no resource or skill anywhere beneath it counts as an implicit gap and costs points at the end, so follow concepts with resources and skills. Scoring rewards coverage (concepts with a resource or skill under them), depth up to three levels, having all three kinds, both players contributing, and notes or urls on nodes.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [
@@ -117,7 +143,7 @@
     {
       "type": "client",
       "name": "prune",
-      "description": "Remove a node and everything under it. Costs one of your 6 moves and ends your turn. The root cannot be pruned. The human can undo your most recent action, so prune only what is clearly off-topic or duplicated.",
+      "description": "Remove a node and everything under it. Costs one of your 6 moves and ends your turn. During your opening (gamePhase \"opening\") it is free instead, and the opening ends after 3 such moves or when you pass. The root cannot be pruned. The human can undo your most recent action, so prune only what is clearly off-topic or duplicated.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [
@@ -143,7 +169,7 @@
     {
       "type": "client",
       "name": "mark_gap",
-      "description": "Flag a node as an open knowledge gap that the other player should fill, keeping its kind. Costs one of your 6 moves and ends your turn. You cannot mark the root, a node that is already a gap, or a node that already has a resource or skill directly under it. Every gap still open when the game ends costs 5 points, so mark gaps you expect to be filled and give a reason.",
+      "description": "Flag a node as an open knowledge gap that the other player should fill, keeping its kind. Costs one of your 6 moves and ends your turn. During your opening (gamePhase \"opening\") it is free instead, and the opening ends after 3 such moves or when you pass. You cannot mark the root, a node that is already a gap, or a node that already has a resource or skill directly under it. Every gap still open when the game ends costs 5 points, so mark gaps you expect to be filled and give a reason.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [
@@ -222,7 +248,7 @@
     {
       "type": "client",
       "name": "pass",
-      "description": "End your turn without moving. Free: costs no move. If both players yield in a row the game ends, so pass only when you have nothing to add or want the human to respond first.",
+      "description": "End your turn without moving. Free: costs no move. During your opening this hands the board to the human, which is how the opening should end. Later, if both players yield in a row the game ends, so pass only when you have nothing to add or want the human to respond first.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [],

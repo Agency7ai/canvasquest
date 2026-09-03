@@ -36,7 +36,16 @@ export default function EndScreen() {
 
   // The share payload never includes history, so an empty one is exact here.
   const shared = useMemo<SavedGame>(
-    () => ({ question, nodes, humanMoves, agentMoves, currentPlayer, gamePhase: 'ended', history: [] }),
+    () => ({
+      question,
+      nodes,
+      humanMoves,
+      agentMoves,
+      currentPlayer,
+      gamePhase: 'ended',
+      history: [],
+      openingMovesUsed: 0,
+    }),
     [question, nodes, humanMoves, agentMoves, currentPlayer],
   );
   const shareUrl = useMemo(() => buildShareUrl(shared), [shared]);

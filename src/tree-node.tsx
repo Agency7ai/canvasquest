@@ -5,6 +5,8 @@ import type { TreeNode, NodeKind } from './types';
 interface TreeNodeProps {
   data: {
     node: TreeNode;
+    /** Derived by the canvas: a concept with no resource or skill beneath it. */
+    implicitGap?: boolean;
   };
 }
 
@@ -23,17 +25,28 @@ const kindLabels: Record<NodeKind, string> = {
 };
 
 const GAP_COLOR = '#ef4444';
+const IMPLICIT_GAP_COLOR = '#f59e0b';
 
 function TreeNodeComponent({ data }: TreeNodeProps) {
-  const { node } = data;
+  const { node, implicitGap = false } = data;
   const colors = kindColors[node.kind];
 
   // A gap keeps the colour of its real kind; the red border and badge sit on top.
-  const border = node.isGap ? `3px dashed ${GAP_COLOR}` : `2px solid ${colors.border}`;
+  // An implicit gap gets an amber dashed border and no badge.
+  const border = node.isGap
+    ? `3px dashed ${GAP_COLOR}`
+    : implicitGap
+      ? `3px dashed ${IMPLICIT_GAP_COLOR}`
+      : `2px solid ${colors.border}`;
+  const tooltip = node.isGap
+    ? `Gap${node.gapReason ? `: ${node.gapReason}` : ''}`
+    : implicitGap
+      ? 'Implicit gap: add a resource or skill beneath this concept'
+      : undefined;
 
   return (
     <div
-      title={node.isGap ? `Gap${node.gapReason ? `: ${node.gapReason}` : ''}` : undefined}
+      title={tooltip}
       style={{
         position: 'relative',
         padding: '12px 16px',

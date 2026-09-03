@@ -56,8 +56,8 @@ export default function VoiceAgent() {
   const runMove = useCallback((name: MoveName, params: Record<string, unknown>) => {
     // The tool result already reports this change back to the agent, so the
     // board watcher below must not narrate it a second time.
-    isAgentActingRef.current = true;
     const result = applyMove(name, params ?? {});
+    isAgentActingRef.current = result.success && name !== 'get_board';
 
     if (name !== 'get_board') {
       setToolCalls(previous => [
@@ -76,14 +76,23 @@ export default function VoiceAgent() {
     if (!isConnected) return;
 
     const initial = useGameStore.getState();
-    let previous = { moves: initial.history.length, player: initial.currentPlayer };
+    let previous = {
+      moves: initial.history.length,
+      player: initial.currentPlayer,
+      phase: initial.gamePhase,
+    };
     let debounce: ReturnType<typeof setTimeout> | undefined;
 
     const unsubscribe = useGameStore.subscribe(state => {
       const boardChanged = state.history.length !== previous.moves;
       const turnChanged = state.currentPlayer !== previous.player;
-      if (!boardChanged && !turnChanged) return;
-      previous = { moves: state.history.length, player: state.currentPlayer };
+      const phaseChanged = state.gamePhase !== previous.phase;
+      if (!boardChanged && !turnChanged && !phaseChanged) return;
+      previous = {
+        moves: state.history.length,
+        player: state.currentPlayer,
+        phase: state.gamePhase,
+      };
 
       if (isAgentActingRef.current) {
         isAgentActingRef.current = false;
@@ -93,15 +102,25 @@ export default function VoiceAgent() {
       clearTimeout(debounce);
       debounce = setTimeout(() => {
         const board = readBoard();
-        const lead = boardChanged
-          ? 'The human changed the board.'
-          : 'The human passed without moving.';
-        controls.sendContextualUpdate(
-          `${lead} The board is now ${JSON.stringify(board)}. ` +
-            (board.currentPlayer === 'agent'
-              ? 'It is your turn: make exactly one move now.'
-              : "It is the human's turn, so wait.")
-        );
+        const lead =
+          board.gamePhase === 'ended'
+            ? `The game is over with a final score of ${board.score} out of 100. Do not call any more move tools.`
+            : board.gamePhase === 'setup'
+              ? 'The human reset the game. Wait for them to choose a new question.'
+              : phaseChanged
+                ? `A new game started. The question is "${board.question}".`
+                : boardChanged
+                  ? 'The human changed the board.'
+                  : board.currentPlayer === 'agent'
+                    ? 'The human passed without moving.'
+                    : 'The human skipped your turn.';
+        const turn =
+          board.gamePhase !== 'playing'
+            ? ''
+            : board.currentPlayer === 'agent'
+              ? ' It is your turn: make exactly one move now.'
+              : " It is the human's turn, so wait.";
+        controls.sendContextualUpdate(`${lead} The board is now ${JSON.stringify(board)}.${turn}`);
       }, 250);
     });
 
@@ -116,7 +135,8 @@ export default function VoiceAgent() {
   useConversationClientTool('branch', (params: Record<string, unknown>) => runMove('branch', params));
   useConversationClientTool('prune', (params: Record<string, unknown>) => runMove('prune', params));
   useConversationClientTool('mark_gap', (params: Record<string, unknown>) => runMove('mark_gap', params));
-  useConversationClientTool('mark_clear', (params: Record<string, unknown>) => runMove('mark_clear', params));
+  useConversationClientTool('annotate', (params: Record<string, unknown>) => runMove('annotate', params));
+  useConversationClientTool('pass', () => runMove('pass', {}));
 
   const handleConnect = useCallback(async () => {
     setError(null);
@@ -218,7 +238,7 @@ export default function VoiceAgent() {
                 VITE_ELEVENLABS_AGENT_ID
               </code>{' '}
               in <code style={{ background: '#f1f5f9', padding: '1px 4px', borderRadius: '3px' }}>.env</code>{' '}
-              to let a voice agent play. See the README for the six client tools to add to your agent.
+              to let a voice agent play. See the README for the seven client tools to add to your agent.
             </p>
           ) : (
             <button

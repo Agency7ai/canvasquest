@@ -1,5 +1,6 @@
-import { useGameStore, BRANCH_KINDS } from './store';
-import type { NodeKind, PlayerType } from './types';
+import { computeImplicitGaps, computeScore } from './scoring';
+import { useGameStore, BRANCH_KINDS, MOVES_PER_PLAYER } from './store';
+import type { GamePhase, NodeKind, PlayerType } from './types';
 
 export interface MoveResult {
   success: boolean;
@@ -22,25 +23,33 @@ export interface BoardNode {
 
 export interface BoardSummary {
   question: string;
-  gamePhase: string;
+  gamePhase: GamePhase;
+  currentPlayer: PlayerType;
+  humanMoves: number;
+  agentMoves: number;
   totalNodes: number;
-  gapNodes: number;
-  movesRemaining: number;
-  currentPlayer: string;
-  gameStatus: string;
+  /** Live score out of 100. */
+  score: number;
+  /** Every open gap, explicit and implicit. Each costs 5 points at the end. */
+  openGaps: string[];
+  /** Concepts with no resource or skill beneath them yet. */
+  implicitGaps: string[];
   nodes: BoardNode[];
 }
 
 export function readBoard(): BoardSummary {
   const state = useGameStore.getState();
+  const score = computeScore(state.nodes);
   return {
     question: state.question,
     gamePhase: state.gamePhase,
-    totalNodes: state.nodes.length,
-    gapNodes: state.nodes.filter(n => n.isGap).length,
-    movesRemaining: state.movesRemaining,
     currentPlayer: state.currentPlayer,
-    gameStatus: state.gameStatus,
+    humanMoves: state.humanMoves,
+    agentMoves: state.agentMoves,
+    totalNodes: state.nodes.length,
+    score: score.total,
+    openGaps: score.openGaps,
+    implicitGaps: computeImplicitGaps(state.nodes),
     nodes: state.nodes.map(n => ({
       id: n.id,
       label: n.label,
@@ -94,7 +103,8 @@ export type MoveName =
   | 'branch'
   | 'prune'
   | 'mark_gap'
-  | 'mark_clear';
+  | 'annotate'
+  | 'pass';
 
 /**
  * The one implementation of every agent move. Both the WebMCP tools and the
@@ -164,11 +174,20 @@ export function applyMove(name: MoveName, input: Record<string, unknown>): MoveR
       return { ...result, board: readBoard() };
     }
 
-    case 'mark_clear': {
+    case 'annotate': {
       const reference = String(input.nodeId ?? '');
       const nodeId = resolveNodeId(reference);
       if (!nodeId) return unresolved(reference);
-      const result = store.markClear(nodeId, 'agent');
+      const result = store.annotate(
+        nodeId,
+        { note: optionalText(input.note), url: optionalText(input.url) },
+        'agent',
+      );
+      return { ...result, board: readBoard() };
+    }
+
+    case 'pass': {
+      const result = store.passTurn('agent');
       return { ...result, board: readBoard() };
     }
   }
@@ -187,18 +206,23 @@ export interface ToolDefinition {
 
 const NODE_REFERENCE = 'The id (for example "n2") or the exact label of the target node.';
 
+const COSTS_A_MOVE = `Costs one of your ${MOVES_PER_PLAYER} moves and ends your turn.`;
+
+/**
+ * Tool descriptions double as the rulebook the agent plays by, so each one
+ * states what the move costs and which rules it can trip over.
+ */
 export const TOOL_DEFINITIONS: ToolDefinition[] = [
   {
     name: 'get_board',
     description:
-      'Read the current board: the seed question, every node with its id, label, kind and gap flag, plus moves remaining and whose turn it is. Call this before making a move so you know which node ids exist.',
+      'Read the current board: the question, every node (id, label, kind, parentId, createdBy, isGap, gapReason, note, url), both move budgets, whose turn it is, the live score out of 100, and openGaps (explicit gaps plus implicit ones: concepts with no resource or skill beneath them). Free: costs no move. Call it before every move so you use real node ids.',
     readOnly: true,
     inputSchema: { type: 'object', properties: {} },
   },
   {
     name: 'plant',
-    description:
-      'Plant the root node of the learning tree. Only valid as the very first move, when the board is empty. Use the seed question as the label.',
+    description: `Plant the root node. Only valid as the first move, when the board is empty. Use the question itself as the label. ${COSTS_A_MOVE}`,
     readOnly: false,
     inputSchema: {
       type: 'object',
@@ -214,8 +238,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'branch',
-    description:
-      'Expand an existing node with a new child node. This is the main way to grow the tree toward the win condition of five or more nodes. A gap is not a kind: use mark_gap to flag a node instead.',
+    description: `Add a child node under an existing node. ${COSTS_A_MOVE} A resource or skill branched directly under a gap closes that gap automatically. A concept with no resource or skill anywhere beneath it counts as an implicit gap and costs points at the end, so follow concepts with resources and skills. Scoring rewards coverage (concepts with a resource or skill under them), depth up to three levels, having all three kinds, both players contributing, and notes or urls on nodes.`,
     readOnly: false,
     inputSchema: {
       type: 'object',
@@ -226,18 +249,17 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
           type: 'string',
           enum: ['concept', 'resource', 'skill'],
           description:
-            'concept for an idea or topic, resource for a book or course, skill for an ability to practise.',
+            'concept for an idea or topic, resource for a book, course, article or tool (add its url), skill for an ability to practise.',
         },
         note: { type: 'string', description: 'Optional short note explaining the node.' },
-        url: { type: 'string', description: 'Optional http(s) link for a resource.' },
+        url: { type: 'string', description: 'Optional http(s) link, especially for a resource.' },
       },
       required: ['parentId', 'label', 'kind'],
     },
   },
   {
     name: 'prune',
-    description:
-      'Remove a node and all of its descendants. Use this to cut an off-topic or duplicated branch. The root cannot be pruned.',
+    description: `Remove a node and everything under it. ${COSTS_A_MOVE} The root cannot be pruned. The human can undo your most recent action, so prune only what is clearly off-topic or duplicated.`,
     readOnly: false,
     inputSchema: {
       type: 'object',
@@ -249,8 +271,7 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
   },
   {
     name: 'mark_gap',
-    description:
-      'Flag a node as an open knowledge gap, keeping its kind. Any remaining gap blocks the win, so only mark what genuinely needs filling.',
+    description: `Flag a node as an open knowledge gap that the other player should fill, keeping its kind. ${COSTS_A_MOVE} You cannot mark the root, a node that is already a gap, or a node that already has a resource or skill directly under it. Every gap still open when the game ends costs 5 points, so mark gaps you expect to be filled and give a reason.`,
     readOnly: false,
     inputSchema: {
       type: 'object',
@@ -265,16 +286,25 @@ export const TOOL_DEFINITIONS: ToolDefinition[] = [
     },
   },
   {
-    name: 'mark_clear',
+    name: 'annotate',
     description:
-      'Clear the gap flag on a node once it has been addressed. Clearing every gap is required to win.',
+      'Attach or replace a note and/or an http(s) url on any node. Free: costs no move and does not end your turn, so you can annotate on either turn. Each node with a note or url earns 1 point, up to 10. Pass an empty string to clear a field.',
     readOnly: false,
     inputSchema: {
       type: 'object',
       properties: {
         nodeId: { type: 'string', description: NODE_REFERENCE },
+        note: { type: 'string', description: 'A short note for the node.' },
+        url: { type: 'string', description: 'An http(s) link for the node.' },
       },
       required: ['nodeId'],
     },
+  },
+  {
+    name: 'pass',
+    description:
+      'End your turn without moving. Free: costs no move. If both players yield in a row the game ends, so pass only when you have nothing to add or want the human to respond first.',
+    readOnly: false,
+    inputSchema: { type: 'object', properties: {} },
   },
 ];

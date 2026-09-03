@@ -22,10 +22,12 @@ Two agent surfaces are supported, and both go through the same tools:
 
 ## Game Rules
 
-- **Goal**: Build a tree with at least 5 nodes and no gaps remaining
-- **Moves**: 10 total moves (human and agent alternate turns)
-- **Win Condition**: Tree has 5+ nodes and zero gap markers when moves are exhausted
-- **Lose Condition**: Moves exhausted with gaps still remaining
+- **Goal**: Grow one learning tree together and finish with the highest score out of 100
+- **Moves**: each player has 6 moves of their own; passing and annotating are free
+- **Turns**: human and agent alternate; a player with no moves left is skipped
+- **End**: the game ends when both budgets are spent, or when both players pass in a row
+- **Gaps**: a node can be flagged as a gap; branching a resource or skill directly under it closes the gap. A concept with no resource or skill anywhere beneath it is an implicit gap
+- **Score**: coverage (6 per concept with a resource or skill beneath it, max 30), depth (5 per level, max 15), kind balance (5 per kind present, max 15), shared authorship (20 if both players created 2+ nodes, 10 if both created 1+), content (1 per node with a note or url, max 10), minus 5 per open gap
 
 ### Node Types
 
@@ -33,30 +35,33 @@ Two agent surfaces are supported, and both go through the same tools:
 - 💡 **Concept**: Ideas, topics, or theories
 - 📚 **Resource**: Books, courses, or learning materials
 - ⚡ **Skill**: Abilities or competencies to develop
-- ❓ **Gap**: Knowledge gaps that need to be filled
+
+A gap (❓) is a flag on top of any of these kinds, not a kind of its own.
 
 ### Available Actions
 
 1. **Plant** - Create the root node (first move only)
-2. **Branch** - Add a child node to any existing node
+2. **Branch** - Add a child node to any existing node; a resource or skill under a gap closes it
 3. **Prune** - Remove a node and all its descendants
-4. **Mark Gap** - Flag a node as a knowledge gap
-5. **Mark Clear** - Remove gap marker from a node
-6. **Undo** - Human can undo the last agent move
+4. **Mark Gap** - Flag a node as a knowledge gap, with an optional reason
+5. **Annotate** - Add a note or url to a node (free)
+6. **Pass** - Yield the turn (free)
+7. **Undo** - Human can undo the last agent action
 
 ## Agent tools
 
-CanvasQuest exposes six tools. Five are the legal moves; `get_board` is read-only
-and does not consume a move.
+CanvasQuest exposes seven tools. Four cost a move; `get_board`, `annotate` and
+`pass` are free.
 
-| Tool | Arguments | Effect |
-| --- | --- | --- |
-| `get_board` | – | Returns the question, every node, moves left, whose turn |
-| `plant` | `label` | Creates the root node (first move only) |
-| `branch` | `parentId`, `label`, `kind` | Adds a child node |
-| `prune` | `nodeId` | Removes a node and its descendants |
-| `mark_gap` | `nodeId` | Flags a node as an open gap |
-| `mark_clear` | `nodeId` | Clears a gap flag |
+| Tool | Arguments | Cost | Effect |
+| --- | --- | --- | --- |
+| `get_board` | – | free | Returns the question, every node, both budgets, whose turn, score and open gaps |
+| `plant` | `label`, `note?` | 1 move | Creates the root node (first move only) |
+| `branch` | `parentId`, `label`, `kind`, `note?`, `url?` | 1 move | Adds a child node; closes the parent's gap if it is a resource or skill |
+| `prune` | `nodeId` | 1 move | Removes a node and its descendants |
+| `mark_gap` | `nodeId`, `reason?` | 1 move | Flags a node as an open gap |
+| `annotate` | `nodeId`, `note?`, `url?` | free | Sets or clears a node's note and url |
+| `pass` | – | free | Ends the turn without moving |
 
 `parentId` and `nodeId` accept either a node id (`n1`, `n2`) or a node's label,
 so a voice agent can say "branch from First Principles" instead of spelling out
@@ -82,17 +87,25 @@ made.
 1. Create an agent in the [ElevenLabs dashboard](https://elevenlabs.io/app/agents).
 2. Leave it **public** (no authentication). A public agent connects from the
    browser with its id alone, so this app needs no API key and no backend.
-3. Add the six tools above as **client tools** on the agent. Ready-to-paste
+3. Add the seven tools above as **client tools** on the agent. Ready-to-paste
    definitions are in [`elevenlabs-tools.json`](elevenlabs-tools.json): in the
    dashboard choose **Tools → Add tool → Edit as JSON** and paste one object
    from the `tools` array for each. Names and parameter ids must match exactly,
    since the browser looks tools up by name and reads arguments by id.
 4. Give the agent a system prompt along these lines:
 
-   > You are playing CanvasQuest, a turn-based game on a shared knowledge tree.
-   > Call `get_board` before each move to see current node ids. You and the human
-   > alternate; make exactly one move per turn. Aim to finish with at least five
-   > nodes and no gap nodes remaining.
+   > You are playing CanvasQuest, a turn-based game where you and a human grow
+   > one learning tree that answers the question on the board. Call `get_board`
+   > before each move to see the real node ids, both move budgets, whose turn it
+   > is and the open gaps. You and the human alternate turns; on your turn make
+   > exactly one costly move (`plant`, `branch`, `prune` or `mark_gap`), then stop
+   > and wait. Each player has 6 moves; `pass` and `annotate` are free. The score
+   > (0 to 100) rewards concepts that have a resource or skill beneath them, depth
+   > up to three levels, using all three kinds, both players contributing, and
+   > notes or urls, and subtracts 5 per open gap (a node marked as a gap, or a
+   > concept with no resource or skill under it). Branch a resource or skill
+   > directly under a gap to close it. Keep labels to two to five words and say
+   > briefly what you did after each move.
 
 5. Copy the agent id into `.env`:
 
@@ -113,7 +126,7 @@ feature detect, so nothing breaks in browsers without WebMCP:
 
 ```ts
 if (typeof document.modelContext?.registerTool === 'function') {
-  // register the six tools
+  // register the seven tools
 }
 ```
 
@@ -146,7 +159,7 @@ board, so the agent can see what changed without reading the DOM.
    npm run dev
    ```
 
-4. Check the console for: `[WebMCP] Registered 6 tools`
+4. Check the console for: `[WebMCP] Registered 7 tools`
 
 ## Local Development
 

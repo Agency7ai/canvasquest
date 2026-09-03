@@ -4,7 +4,7 @@
     {
       "type": "client",
       "name": "get_board",
-      "description": "Read the current board: the seed question, every node with its id, label, kind and gap flag, plus moves remaining and whose turn it is. Call this before making a move so you know which node ids exist.",
+      "description": "Read the current board: the question, every node (id, label, kind, parentId, createdBy, isGap, gapReason, note, url), both move budgets, whose turn it is, the live score out of 100, and openGaps (explicit gaps plus implicit ones: concepts with no resource or skill beneath them). Free: costs no move. Call it before every move so you use real node ids.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [],
@@ -20,7 +20,7 @@
     {
       "type": "client",
       "name": "plant",
-      "description": "Plant the root node of the learning tree. Only valid as the very first move, when the board is empty. Use the seed question as the label.",
+      "description": "Plant the root node. Only valid as the first move, when the board is empty. Use the question itself as the label. Costs one of your 6 moves and ends your turn.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [
@@ -55,14 +55,14 @@
     {
       "type": "client",
       "name": "branch",
-      "description": "Expand an existing node with a new child node. This is the main way to grow the tree toward the win condition of five or more nodes. A gap is not a kind: use mark_gap to flag a node instead.",
+      "description": "Add a child node under an existing node. Costs one of your 6 moves and ends your turn. A resource or skill branched directly under a gap closes that gap automatically. A concept with no resource or skill anywhere beneath it counts as an implicit gap and costs points at the end, so follow concepts with resources and skills. Scoring rewards coverage (concepts with a resource or skill under them), depth up to three levels, having all three kinds, both players contributing, and notes or urls on nodes.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [
         {
           "id": "parentId",
           "type": "string",
-          "description": "The id (for example n2) or the exact label of the node to branch from. Call get_board first to see valid ids.",
+          "description": "The id (for example \"n2\") or the exact label of the target node. This node becomes the parent.",
           "dynamic_variable": "",
           "required": true,
           "constant_value": "",
@@ -80,7 +80,7 @@
         {
           "id": "kind",
           "type": "string",
-          "description": "Exactly one of: concept, resource, skill. Use concept for an idea or topic, resource for a book or course, skill for an ability to practise.",
+          "description": "Exactly one of: concept, resource, skill. concept for an idea or topic, resource for a book, course, article or tool (add its url), skill for an ability to practise.",
           "dynamic_variable": "",
           "required": true,
           "constant_value": "",
@@ -98,7 +98,7 @@
         {
           "id": "url",
           "type": "string",
-          "description": "Optional http(s) link for a resource.",
+          "description": "Optional http(s) link, especially for a resource.",
           "dynamic_variable": "",
           "required": false,
           "constant_value": "",
@@ -117,14 +117,14 @@
     {
       "type": "client",
       "name": "prune",
-      "description": "Remove a node and all of its descendants. Use this to cut an off-topic or duplicated branch. The root cannot be pruned.",
+      "description": "Remove a node and everything under it. Costs one of your 6 moves and ends your turn. The root cannot be pruned. The human can undo your most recent action, so prune only what is clearly off-topic or duplicated.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [
         {
           "id": "nodeId",
           "type": "string",
-          "description": "The id (for example n2) or the exact label of the node to remove.",
+          "description": "The id (for example \"n2\") or the exact label of the target node.",
           "dynamic_variable": "",
           "required": true,
           "constant_value": "",
@@ -143,14 +143,14 @@
     {
       "type": "client",
       "name": "mark_gap",
-      "description": "Flag a node as an open knowledge gap, keeping its kind. Any remaining gap blocks the win, so only mark what genuinely needs filling.",
+      "description": "Flag a node as an open knowledge gap that the other player should fill, keeping its kind. Costs one of your 6 moves and ends your turn. You cannot mark the root, a node that is already a gap, or a node that already has a resource or skill directly under it. Every gap still open when the game ends costs 5 points, so mark gaps you expect to be filled and give a reason.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [
         {
           "id": "nodeId",
           "type": "string",
-          "description": "The id (for example n2) or the exact label of the node to flag.",
+          "description": "The id (for example \"n2\") or the exact label of the target node.",
           "dynamic_variable": "",
           "required": true,
           "constant_value": "",
@@ -177,21 +177,55 @@
     },
     {
       "type": "client",
-      "name": "mark_clear",
-      "description": "Clear the gap flag on a node once it has been addressed. Clearing every gap is required to win.",
+      "name": "annotate",
+      "description": "Attach or replace a note and/or an http(s) url on any node. Free: costs no move and does not end your turn, so you can annotate on either turn. Each node with a note or url earns 1 point, up to 10. Pass an empty string to clear a field.",
       "expects_response": true,
       "response_timeout_secs": 10,
       "parameters": [
         {
           "id": "nodeId",
           "type": "string",
-          "description": "The id (for example n2) or the exact label of the gap node to clear.",
+          "description": "The id (for example \"n2\") or the exact label of the target node.",
           "dynamic_variable": "",
           "required": true,
           "constant_value": "",
           "value_type": "llm_prompt"
+        },
+        {
+          "id": "note",
+          "type": "string",
+          "description": "A short note for the node.",
+          "dynamic_variable": "",
+          "required": false,
+          "constant_value": "",
+          "value_type": "llm_prompt"
+        },
+        {
+          "id": "url",
+          "type": "string",
+          "description": "An http(s) link for the node.",
+          "dynamic_variable": "",
+          "required": false,
+          "constant_value": "",
+          "value_type": "llm_prompt"
         }
       ],
+      "dynamic_variables": {
+        "dynamic_variable_placeholders": {}
+      },
+      "assignments": [],
+      "interruption_mode": "allow",
+      "tool_call_sound": null,
+      "tool_call_sound_behavior": "auto",
+      "response_mocks": []
+    },
+    {
+      "type": "client",
+      "name": "pass",
+      "description": "End your turn without moving. Free: costs no move. If both players yield in a row the game ends, so pass only when you have nothing to add or want the human to respond first.",
+      "expects_response": true,
+      "response_timeout_secs": 10,
+      "parameters": [],
       "dynamic_variables": {
         "dynamic_variable_placeholders": {}
       },

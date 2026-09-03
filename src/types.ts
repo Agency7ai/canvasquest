@@ -24,7 +24,7 @@ export interface NodeContent {
   url?: string;
 }
 
-export type ActionType = 'plant' | 'branch' | 'prune' | 'mark_gap' | 'mark_clear' | 'annotate';
+export type ActionType = 'plant' | 'branch' | 'prune' | 'mark_gap' | 'annotate';
 
 export interface GameAction {
   type: ActionType;
@@ -46,8 +46,12 @@ export interface GameState {
   gamePhase: GamePhase;
   nodes: TreeNode[];
   currentPlayer: PlayerType;
-  movesRemaining: number;
-  gameStatus: 'playing' | 'won' | 'lost';
+  /** Moves the human may still make. */
+  humanMoves: number;
+  /** Moves the agent may still make. */
+  agentMoves: number;
+  /** Turns yielded in a row (a pass or a skip) with no move between them. */
+  consecutivePasses: number;
   history: GameAction[];
 }
 

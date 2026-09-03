@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import ReactFlow, {
   type Node,
   type Edge,
@@ -7,6 +8,7 @@ import ReactFlow, {
   type NodeTypes,
 } from 'reactflow';
 import 'reactflow/dist/style.css';
+import { computeImplicitGaps } from './scoring';
 import { useGameStore } from './store';
 import type { TreeNode as GameTreeNode } from './types';
 import TreeNodeComponent from './tree-node';
@@ -18,13 +20,17 @@ const nodeTypes: NodeTypes = {
 export default function GameCanvas() {
   const nodes = useGameStore(state => state.nodes);
 
+  // Implicit gaps are derived, never stored: a concept with nothing concrete
+  // beneath it is drawn as a gap until someone branches a resource or skill.
+  const implicitGaps = useMemo(() => new Set(computeImplicitGaps(nodes)), [nodes]);
+
   const flowNodes: Node[] = nodes.map((node) => {
     const position = calculateNodePosition(node, nodes);
     return {
       id: node.id,
       type: 'treeNode',
       position,
-      data: { node },
+      data: { node, implicitGap: implicitGaps.has(node.id) },
     };
   });
 
@@ -37,7 +43,7 @@ export default function GameCanvas() {
       type: 'smoothstep',
       animated: n.isGap,
       style: {
-        stroke: n.isGap ? '#ef4444' : '#64748b',
+        stroke: n.isGap ? '#ef4444' : implicitGaps.has(n.id) ? '#f59e0b' : '#64748b',
         strokeWidth: 2,
       },
     }));

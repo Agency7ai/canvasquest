@@ -1,13 +1,14 @@
 import { useState, useEffect } from 'react';
-import { useGameStore } from './store';
+import { computeScore } from './scoring';
+import { MOVES_PER_PLAYER, useGameStore } from './store';
 import type { NodeKind } from './types';
 import { hasWebMCP as detectWebMCP } from './use-webmcp';
 
 const IDLE_PASS_MS = 15000;
 
 export default function GameControls() {
-  const { nodes, currentPlayer, movesRemaining, gameStatus, gamePhase, question } = useGameStore();
-  const { plant, branch, prune, markGap, markClear, undoLastMove, passTurn, resetGame, startGame } = useGameStore();
+  const { nodes, currentPlayer, humanMoves, agentMoves, gamePhase, question } = useGameStore();
+  const { plant, branch, prune, markGap, undoLastMove, passTurn, skipAgentTurn, resetGame, startGame } = useGameStore();
   const hasWebMCP = detectWebMCP();
   const isVoiceConnected = useGameStore(state => state.isVoiceConnected);
 
@@ -71,15 +72,6 @@ export default function GameControls() {
     showFeedback(result.message);
   };
 
-  const handleMarkClear = () => {
-    if (!selectedNodeId) {
-      showFeedback('Please select a gap node to clear');
-      return;
-    }
-    const result = markClear(selectedNodeId, 'human');
-    showFeedback(result.message);
-  };
-
   const handleUndo = () => {
     const result = undoLastMove();
     showFeedback(result.message);
@@ -98,25 +90,22 @@ export default function GameControls() {
     if (result.success) setQuestionDraft('');
   };
 
-  const gapCount = nodes.filter(n => n.isGap).length;
-  const isWinnable = nodes.length >= 5 && gapCount === 0;
-
-  const handleSkipAgent = () => {
-    useGameStore.setState({ currentPlayer: 'human' });
-    showFeedback('Skipped agent turn');
-  };
+  const score = computeScore(nodes);
 
   // With no agent connected the board would deadlock on the agent's turn, so
   // hand the turn straight back. A live agent keeps its turn.
   const hasAgent = hasWebMCP || isVoiceConnected;
   useEffect(() => {
     if (hasAgent || currentPlayer !== 'agent' || gamePhase !== 'playing') return;
-    const timer = setTimeout(handleSkipAgent, 1000);
+    const timer = setTimeout(() => {
+      const result = skipAgentTurn();
+      showFeedback(result.message);
+    }, 1000);
     return () => clearTimeout(timer);
-  }, [hasAgent, currentPlayer, gamePhase]);
+  }, [hasAgent, currentPlayer, gamePhase, skipAgentTurn]);
 
   const handlePass = () => {
-    const result = passTurn();
+    const result = passTurn('human');
     showFeedback(result.message);
   };
 
@@ -125,7 +114,7 @@ export default function GameControls() {
   useEffect(() => {
     if (!isVoiceConnected || currentPlayer !== 'human' || gamePhase !== 'playing') return;
     const timer = setTimeout(() => {
-      passTurn();
+      passTurn('human');
       showFeedback('You were idle, so the agent takes this turn');
     }, IDLE_PASS_MS);
     return () => clearTimeout(timer);
@@ -144,26 +133,26 @@ export default function GameControls() {
       overflowY: 'auto',
     }}>
       <div style={{
-        background: gameStatus === 'won' ? '#10b981' : gameStatus === 'lost' ? '#ef4444' : '#6366f1',
+        background: gamePhase === 'ended' ? '#0f172a' : '#6366f1',
         color: 'white',
         padding: '16px',
         borderRadius: '8px',
         textAlign: 'center',
       }}>
         <div style={{ fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
-          {gameStatus === 'playing' ? 'CanvasQuest' : gameStatus === 'won' ? '🎉 Victory!' : '😔 Game Over'}
+          {gamePhase === 'ended' ? '🏁 Game over' : 'CanvasQuest'}
         </div>
         <div style={{ fontSize: '14px', opacity: 0.9 }}>
-          Moves: {movesRemaining} | Turn: {currentPlayer}
-        </div>
-        <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
-          Nodes: {nodes.length} | Gaps: {gapCount}
+          Human: {humanMoves} moves · Agent: {agentMoves} moves
         </div>
         {gamePhase === 'playing' && (
-          <div style={{ fontSize: '12px', marginTop: '8px', opacity: 0.9 }}>
-            {isWinnable ? '✨ Win condition met!' : `Need ${Math.max(0, 5 - nodes.length)} more nodes${gapCount > 0 ? ` & clear ${gapCount} gaps` : ''}`}
+          <div style={{ fontSize: '13px', marginTop: '4px', opacity: 0.9 }}>
+            Turn: {currentPlayer}
           </div>
         )}
+        <div style={{ fontSize: '12px', marginTop: '4px', opacity: 0.8 }}>
+          Score: {score.total}/100 · Open gaps: {score.openGaps.length} · Nodes: {nodes.length}
+        </div>
       </div>
 
       <div style={{ fontSize: '13px', color: '#475569', lineHeight: '1.4' }}>
@@ -355,38 +344,22 @@ export default function GameControls() {
                 </button>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-                <button
-                  onClick={handleMarkGap}
-                  style={{
-                    padding: '10px',
-                    background: '#f59e0b',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                  }}
-                >
-                  Mark Gap
-                </button>
-                <button
-                  onClick={handleMarkClear}
-                  style={{
-                    padding: '10px',
-                    background: '#8b5cf6',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '6px',
-                    fontWeight: '600',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                  }}
-                >
-                  Clear Gap
-                </button>
-              </div>
+              <button
+                onClick={handleMarkGap}
+                title="Flag the target node as a gap. Branching a resource or skill under it closes the gap."
+                style={{
+                  padding: '10px',
+                  background: '#f59e0b',
+                  color: 'white',
+                  border: 'none',
+                  borderRadius: '6px',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                }}
+              >
+                ❓ Mark Gap
+              </button>
             </>
           )}
 
@@ -408,16 +381,17 @@ export default function GameControls() {
             </button>
             <button
               onClick={handlePass}
-              disabled={!hasAgent}
-              title={hasAgent ? 'Give this turn to the agent' : 'No agent connected'}
+              title={hasAgent
+                ? 'Give this turn to the agent for free. If the agent passes too, the game ends.'
+                : 'No agent connected: passing ends the game and shows the score.'}
               style={{
                 padding: '10px',
-                background: hasAgent ? '#0f172a' : '#cbd5e1',
+                background: '#0f172a',
                 color: 'white',
                 border: 'none',
                 borderRadius: '6px',
                 fontWeight: '600',
-                cursor: hasAgent ? 'pointer' : 'not-allowed',
+                cursor: 'pointer',
                 fontSize: '13px',
               }}
             >
@@ -452,7 +426,9 @@ export default function GameControls() {
       )}
 
       <div style={{ fontSize: '12px', color: '#64748b', lineHeight: '1.4', paddingTop: '12px', borderTop: '1px solid #e2e8f0' }}>
-        <strong>Goal:</strong> Build a tree with 5+ nodes and no gaps in 10 moves
+        <strong>Goal:</strong> Grow one learning tree together. Each player has {MOVES_PER_PLAYER} moves;
+        passing and notes are free. Score up to 100 for coverage, depth, kind balance, shared
+        authorship and content, minus 5 for every open gap.
       </div>
     </div>
   );
